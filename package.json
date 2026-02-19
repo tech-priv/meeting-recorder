@@ -1,0 +1,19 @@
+{
+  "name": "meeting-recorder",
+  "version": "1.0.0",
+  "description": "Record, transcribe and summarize Teams meetings",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "install-whisper": "pip3 install openai-whisper && echo 'Whisper installed'"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.0",
+    "node-wav": "^0.0.2",
+    "nodemailer": "^6.9.13",
+    "openai": "^4.52.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}

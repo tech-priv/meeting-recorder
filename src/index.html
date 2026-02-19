@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Meeting Recorder</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:         #0f1117;
+    --bg2:        #1a1d27;
+    --bg3:        #22263a;
+    --border:     #2e3348;
+    --accent:     #6366f1;
+    --accent2:    #818cf8;
+    --green:      #22c55e;
+    --red:        #ef4444;
+    --yellow:     #f59e0b;
+    --text:       #e2e8f0;
+    --text2:      #94a3b8;
+    --text3:      #64748b;
+    --radius:     12px;
+    --radius-sm:  8px;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    -webkit-app-region: no-drag;
+  }
+
+  /* ── Titlebar ── */
+  .titlebar {
+    height: 52px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px 0 80px;
+    -webkit-app-region: drag;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  .titlebar-logo {
+    width: 28px; height: 28px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+    -webkit-app-region: no-drag;
+  }
+  .titlebar-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  .titlebar-spacer { flex: 1; }
+  .titlebar-btn {
+    -webkit-app-region: no-drag;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    padding: 5px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .titlebar-btn:hover { background: var(--border); color: var(--text); }
+
+  /* ── Layout ── */
+  .app-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Tabs ── */
+  .sidebar {
+    width: 200px;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    padding: 16px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .tab {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text2);
+    transition: all .15s;
+    font-weight: 500;
+  }
+  .tab:hover { background: var(--bg3); color: var(--text); }
+  .tab.active { background: var(--accent); color: #fff; }
+  .tab-icon { font-size: 15px; width: 18px; text-align: center; }
+
+  /* ── Content ── */
+  .content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 28px;
+  }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ── Section titles ── */
+  .section-title {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 6px;
+  }
+  .section-sub {
+    font-size: 13px;
+    color: var(--text2);
+    margin-bottom: 24px;
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text2);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    margin-bottom: 14px;
+  }
+
+  /* ── Window picker ── */
+  .window-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .window-item {
+    background: var(--bg3);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    overflow: hidden;
+    transition: all .15s;
+  }
+  .window-item:hover { border-color: var(--accent2); }
+  .window-item.selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,.2); }
+  .window-thumb {
+    width: 100%;
+    aspect-ratio: 16/9;
+    object-fit: cover;
+    display: block;
+    background: #000;
+  }
+  .window-name {
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--text2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .window-item.selected .window-name { color: var(--accent2); }
+
+  /* ── Buttons ── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 20px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all .15s;
+  }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: var(--accent2); }
+  .btn-danger  { background: var(--red); color: #fff; }
+  .btn-danger:hover:not(:disabled)  { background: #dc2626; }
+  .btn-ghost   { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover:not(:disabled)   { background: var(--border); }
+  .btn-success { background: var(--green); color: #fff; }
+  .btn-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+  /* ── Record button ── */
+  .record-btn-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 28px 0 20px;
+  }
+  .record-btn {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px;
+    transition: all .2s;
+    background: var(--accent);
+    box-shadow: 0 0 0 0 rgba(99,102,241,.4);
+  }
+  .record-btn.recording {
+    background: var(--red);
+    animation: pulse 1.5s infinite;
+  }
+  .record-btn:hover:not(:disabled) { transform: scale(1.07); }
+  .record-btn:disabled { opacity: .4; cursor: not-allowed; }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0   rgba(239,68,68,.5); }
+    70%  { box-shadow: 0 0 0 18px rgba(239,68,68,0); }
+    100% { box-shadow: 0 0 0 0   rgba(239,68,68,0); }
+  }
+  .record-timer {
+    font-size: 28px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .02em;
+    color: var(--text);
+  }
+  .record-status {
+    font-size: 13px;
+    color: var(--text2);
+  }
+  .record-status.live { color: var(--red); font-weight: 600; }
+
+  /* ── Pipeline steps ── */
+  .pipeline {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .step {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 16px;
+    background: var(--bg3);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text2);
+  }
+  .step-icon {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+  .step.done   .step-icon { background: var(--green); color: #fff; }
+  .step.active .step-icon { background: var(--accent); color: #fff; animation: spin .8s linear infinite; }
+  .step.error  .step-icon { background: var(--red); color: #fff; }
+  .step.done   { border-color: rgba(34,197,94,.3); }
+  .step.active { border-color: rgba(99,102,241,.4); color: var(--text); }
+  .step.error  { border-color: rgba(239,68,68,.3); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .step-label { flex: 1; font-weight: 500; }
+  .step-detail { font-size: 11px; color: var(--text3); }
+
+  /* ── Transcript output ── */
+  .output-box {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text);
+    white-space: pre-wrap;
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .notes-box {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 20px;
+    font-size: 13.5px;
+    line-height: 1.8;
+    color: var(--text);
+    white-space: pre-wrap;
+    max-height: 360px;
+    overflow-y: auto;
+  }
+
+  /* ── Settings form ── */
+  .form-group { margin-bottom: 16px; }
+  .form-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text2);
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    margin-bottom: 6px;
+  }
+  .form-input, .form-select {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 9px 12px;
+    color: var(--text);
+    font-size: 13px;
+    outline: none;
+    transition: border-color .15s;
+    font-family: inherit;
+  }
+  .form-input:focus, .form-select:focus { border-color: var(--accent); }
+  .form-input[type=password] { letter-spacing: .1em; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-hint { font-size: 11px; color: var(--text3); margin-top: 4px; }
+
+  /* ── Provider toggle ── */
+  .toggle-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .toggle-opt {
+    flex: 1;
+    padding: 9px;
+    background: var(--bg3);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text2);
+    transition: all .15s;
+  }
+  .toggle-opt.selected { border-color: var(--accent); color: var(--accent2); background: rgba(99,102,241,.1); }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed;
+    bottom: 20px; right: 20px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px 18px;
+    font-size: 13px;
+    color: var(--text);
+    display: none;
+    z-index: 999;
+    max-width: 320px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  }
+  #toast.show { display: block; }
+  #toast.success { border-color: rgba(34,197,94,.5); }
+  #toast.error   { border-color: rgba(239,68,68,.5); }
+
+  /* ── Badge ── */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge-green  { background: rgba(34,197,94,.15);  color: var(--green); }
+  .badge-yellow { background: rgba(245,158,11,.15); color: var(--yellow); }
+  .badge-blue   { background: rgba(99,102,241,.15); color: var(--accent2); }
+
+  /* ── Divider ── */
+  .divider { height: 1px; background: var(--border); margin: 20px 0; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- Titlebar -->
+<div class="titlebar">
+  <div class="titlebar-logo">🎙</div>
+  <span class="titlebar-title">Meeting Recorder</span>
+  <div class="titlebar-spacer"></div>
+  <button class="titlebar-btn" onclick="api.openRecordings()">📁 Recordings</button>
+</div>
+
+<!-- Body -->
+<div class="app-body">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="tab active" data-page="record" onclick="switchTab('record')">
+      <span class="tab-icon">⏺</span> Record
+    </div>
+    <div class="tab" data-page="results" onclick="switchTab('results')">
+      <span class="tab-icon">📄</span> Results
+    </div>
+    <div class="tab" data-page="settings" onclick="switchTab('settings')">
+      <span class="tab-icon">⚙️</span> Settings
+    </div>
+  </nav>
+
+  <!-- Content -->
+  <div class="content">
+
+    <!-- ── RECORD PAGE ── -->
+    <div id="page-record" class="page active">
+      <div class="section-title">Record a Meeting</div>
+      <div class="section-sub">Select the window to capture, then press record.</div>
+
+      <!-- Window picker -->
+      <div class="card">
+        <div class="card-title">Select Window to Capture</div>
+        <div style="margin-bottom:12px" class="btn-row">
+          <button class="btn btn-ghost" onclick="refreshWindows()">🔄 Refresh Windows</button>
+          <span id="selected-window-label" style="font-size:13px;color:var(--text2)">No window selected</span>
+        </div>
+        <div class="window-grid" id="window-grid">
+          <div style="color:var(--text3);font-size:13px;padding:20px">Click "Refresh Windows" to load available windows.</div>
+        </div>
+      </div>
+
+      <!-- AI Provider for this session -->
+      <div class="card">
+        <div class="card-title">AI Provider for Summary</div>
+        <div class="toggle-row">
+          <div class="toggle-opt selected" id="opt-claude" onclick="selectProvider('claude')">🟣 Claude</div>
+          <div class="toggle-opt" id="opt-chatgpt" onclick="selectProvider('chatgpt')">🟢 ChatGPT</div>
+        </div>
+        <div style="font-size:12px;color:var(--text3)">API keys are configured in Settings.</div>
+      </div>
+
+      <!-- Record control -->
+      <div class="card">
+        <div class="card-title">Recording</div>
+        <div class="record-btn-wrap">
+          <button class="record-btn" id="record-btn" onclick="toggleRecording()" disabled title="Select a window first">
+            ⏺
+          </button>
+          <div class="record-timer" id="record-timer">00:00:00</div>
+          <div class="record-status" id="record-status">Select a window to start</div>
+        </div>
+      </div>
+
+      <!-- Pipeline status (hidden until recording stops) -->
+      <div class="card" id="pipeline-card" style="display:none">
+        <div class="card-title">Processing Pipeline</div>
+        <div class="pipeline">
+          <div class="step" id="step-transcribe">
+            <div class="step-icon">✦</div>
+            <div>
+              <div class="step-label">Transcribing audio</div>
+              <div class="step-detail">Local Whisper on Apple Silicon</div>
+            </div>
+          </div>
+          <div class="step" id="step-summarize">
+            <div class="step-icon">✦</div>
+            <div>
+              <div class="step-label">Generating meeting notes</div>
+              <div class="step-detail" id="step-summarize-detail">Waiting…</div>
+            </div>
+          </div>
+          <div class="step" id="step-save">
+            <div class="step-icon">✦</div>
+            <div>
+              <div class="step-label">Saving files</div>
+              <div class="step-detail">transcript.txt · meeting_notes.md · subtitles.srt</div>
+            </div>
+          </div>
+          <div class="step" id="step-email">
+            <div class="step-icon">✦</div>
+            <div>
+              <div class="step-label">Sending email</div>
+              <div class="step-detail" id="step-email-detail">Waiting…</div>
+            </div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="btn-row">
+          <button class="btn btn-ghost" onclick="switchTab('results')">View Results →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── RESULTS PAGE ── -->
+    <div id="page-results" class="page">
+      <div class="section-title">Results</div>
+      <div class="section-sub">Transcript and meeting notes from the last session.</div>
+
+      <div id="no-results" style="color:var(--text2);font-size:14px;padding:20px 0">
+        No results yet. Record a meeting first.
+      </div>
+
+      <div id="results-content" style="display:none">
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+            <div class="card-title" style="margin:0">Meeting Notes</div>
+            <span id="notes-provider-badge" class="badge badge-blue">Claude</span>
+          </div>
+          <div class="notes-box" id="notes-output"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Raw Transcript</div>
+          <div class="output-box" id="transcript-output"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Session Files</div>
+          <div id="session-files" style="font-size:13px;color:var(--text2);line-height:2"></div>
+          <div class="divider"></div>
+          <button class="btn btn-ghost" onclick="api.openRecordings()">📁 Open in Finder</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SETTINGS PAGE ── -->
+    <div id="page-settings" class="page">
+      <div class="section-title">Settings</div>
+      <div class="section-sub">Configure API keys, email, and recording options.</div>
+
+      <div class="card">
+        <div class="card-title">AI API Keys</div>
+        <div class="form-group">
+          <label class="form-label">Anthropic API Key (Claude)</label>
+          <input type="password" class="form-input" id="cfg-anthropicKey" placeholder="sk-ant-..."/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">OpenAI API Key (ChatGPT)</label>
+          <input type="password" class="form-input" id="cfg-openaiKey" placeholder="sk-..."/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Whisper Model</label>
+          <select class="form-select" id="cfg-whisperModel">
+            <option value="tiny">tiny — fastest, less accurate</option>
+            <option value="base" selected>base — good balance (recommended)</option>
+            <option value="small">small — better accuracy</option>
+            <option value="medium">medium — high accuracy, slower</option>
+            <option value="large">large — best accuracy, slowest</option>
+          </select>
+          <div class="form-hint">Larger models take more time but produce better transcripts. "base" or "small" works well for meetings.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Email (SMTP)</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">SMTP Host</label>
+            <input type="text" class="form-input" id="cfg-smtpHost" placeholder="smtp.gmail.com"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">SMTP Port</label>
+            <input type="number" class="form-input" id="cfg-smtpPort" placeholder="587"/>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">SMTP Username</label>
+            <input type="text" class="form-input" id="cfg-smtpUser" placeholder="you@gmail.com"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">SMTP Password</label>
+            <input type="password" class="form-input" id="cfg-smtpPass" placeholder="App password or SMTP password"/>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">From Address</label>
+            <input type="email" class="form-input" id="cfg-emailFrom" placeholder="you@gmail.com"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Send Notes To</label>
+            <input type="email" class="form-input" id="cfg-emailTo" placeholder="team@company.com"/>
+          </div>
+        </div>
+        <div class="form-hint" style="margin-top:4px">
+          For Gmail: use an <strong style="color:var(--text2)">App Password</strong> (not your regular password).
+          Generate one at myaccount.google.com → Security → 2-Step Verification → App passwords.
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="saveSettings()">💾 Save Settings</button>
+        <button class="btn btn-ghost" onclick="testEmail()">📨 Test Email</button>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /app-body -->
+
+<div id="toast"></div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let config        = {};
+let selectedSource = null;
+let aiProvider    = 'claude';
+let isRecording   = false;
+let mediaRecorder = null;
+let timerInterval = null;
+let elapsed       = 0;
+let sessionDir    = null;
+let audioPath     = null;
+let lastResults   = null;
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+(async () => {
+  config = await api.loadConfig();
+  applyConfigToForm(config);
+})();
+
+// ─── Tab switching ────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.page === name));
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === `page-${name}`));
+}
+
+// ─── Window picker ────────────────────────────────────────────────────────────
+async function refreshWindows() {
+  const grid = document.getElementById('window-grid');
+  grid.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:20px">Loading windows…</div>';
+  try {
+    const windows = await api.getWindows();
+    if (!windows.length) {
+      grid.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:20px">No windows found. Make sure Teams is open.</div>';
+      return;
+    }
+    grid.innerHTML = '';
+    windows.forEach(w => {
+      const div = document.createElement('div');
+      div.className = 'window-item';
+      div.dataset.id = w.id;
+      div.innerHTML = `
+        <img class="window-thumb" src="${w.thumbnail}" alt="${w.name}"/>
+        <div class="window-name" title="${w.name}">${w.name}</div>
+      `;
+      div.onclick = () => selectWindow(w, div);
+      grid.appendChild(div);
+    });
+  } catch(e) {
+    grid.innerHTML = `<div style="color:var(--red);font-size:13px;padding:20px">Error: ${e.message}</div>`;
+  }
+}
+
+function selectWindow(source, el) {
+  document.querySelectorAll('.window-item').forEach(i => i.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedSource = source;
+  document.getElementById('selected-window-label').textContent = `Selected: ${source.name}`;
+  document.getElementById('record-btn').disabled = false;
+  document.getElementById('record-status').textContent = 'Ready to record';
+}
+
+// ─── Provider toggle ──────────────────────────────────────────────────────────
+function selectProvider(p) {
+  aiProvider = p;
+  document.getElementById('opt-claude').classList.toggle('selected', p === 'claude');
+  document.getElementById('opt-chatgpt').classList.toggle('selected', p === 'chatgpt');
+}
+
+// ─── Recording ────────────────────────────────────────────────────────────────
+async function toggleRecording() {
+  if (!isRecording) {
+    await startRecording();
+  } else {
+    await stopRecording();
+  }
+}
+
+async function startRecording() {
+  if (!selectedSource) return toast('Select a window first', 'error');
+
+  try {
+    // Get screen capture stream for the selected window
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        mandatory: {
+          chromeMediaSource: 'desktop',
+          chromeMediaSourceId: selectedSource.id,
+          minWidth: 1280, maxWidth: 3840,
+          minHeight: 720, maxHeight: 2160
+        }
+      }
+    });
+
+    // Start session
+    const session = await api.recordingStart();
+    sessionDir = session.sessionDir;
+
+    // Start audio recording via ffmpeg/BlackHole in main process
+    const audioResult = await api.startAudio({ sessionDir });
+    audioPath = audioResult.audioPath;
+
+    // Setup MediaRecorder for video
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+    mediaRecorder.ondataavailable = async (e) => {
+      if (e.data.size > 0) {
+        const buf = await e.data.arrayBuffer();
+        await api.saveVideoChunk(buf);
+      }
+    };
+    mediaRecorder.start(2000); // chunk every 2s
+
+    // UI update
+    isRecording = true;
+    elapsed = 0;
+    const btn = document.getElementById('record-btn');
+    btn.classList.add('recording');
+    btn.textContent = '⏹';
+    document.getElementById('record-status').className = 'record-status live';
+    document.getElementById('record-status').textContent = '● Recording…';
+    document.getElementById('pipeline-card').style.display = 'none';
+
+    timerInterval = setInterval(() => {
+      elapsed++;
+      document.getElementById('record-timer').textContent = formatTime(elapsed);
+    }, 1000);
+
+  } catch(e) {
+    toast('Failed to start recording: ' + e.message, 'error');
+    console.error(e);
+  }
+}
+
+async function stopRecording() {
+  if (!isRecording) return;
+  isRecording = false;
+
+  // Stop timer
+  clearInterval(timerInterval);
+
+  // Stop MediaRecorder
+  mediaRecorder.stop();
+  mediaRecorder.stream.getTracks().forEach(t => t.stop());
+
+  // Stop audio
+  await api.stopAudio();
+
+  // Stop video save
+  const { videoPath } = await api.recordingStop({ sessionDir });
+
+  // UI update
+  const btn = document.getElementById('record-btn');
+  btn.classList.remove('recording');
+  btn.textContent = '⏺';
+  btn.disabled = true;
+  document.getElementById('record-status').className = 'record-status';
+  document.getElementById('record-status').textContent = 'Processing…';
+
+  // Show pipeline
+  document.getElementById('pipeline-card').style.display = 'block';
+  resetSteps();
+
+  // Run pipeline
+  await runPipeline();
+
+  btn.disabled = false;
+}
+
+// ─── Post-recording pipeline ──────────────────────────────────────────────────
+async function runPipeline() {
+  let transcript = '';
+  let srt = '';
+  let notes = '';
+
+  // Step 1: Transcribe
+  setStep('transcribe', 'active');
+  try {
+    const result = await api.transcribe({ audioPath, model: config.whisperModel || 'base' });
+    transcript = result.text;
+    srt = result.srt;
+    setStep('transcribe', 'done');
+  } catch(e) {
+    setStep('transcribe', 'error');
+    toast('Transcription failed: ' + e.message, 'error');
+    return;
+  }
+
+  // Step 2: Summarize
+  setStep('summarize', 'active');
+  document.getElementById('step-summarize-detail').textContent =
+    `Using ${aiProvider === 'claude' ? 'Claude Opus' : 'GPT-4o'}…`;
+  try {
+    notes = await api.summarize({ transcript, provider: aiProvider, config });
+    setStep('summarize', 'done');
+  } catch(e) {
+    setStep('summarize', 'error');
+    toast('Summarization failed: ' + e.message, 'error');
+    return;
+  }
+
+  // Step 3: Save files
+  setStep('save', 'active');
+  let transcriptPath, notesPath;
+  try {
+    const saved = await api.saveOutputs({ sessionDir, transcript, notes, srt });
+    transcriptPath = saved.transcriptPath;
+    notesPath = saved.notesPath;
+    setStep('save', 'done');
+  } catch(e) {
+    setStep('save', 'error');
+    toast('File save failed: ' + e.message, 'error');
+    return;
+  }
+
+  // Step 4: Email
+  setStep('email', 'active');
+  document.getElementById('step-email-detail').textContent = `Sending to ${config.emailTo}…`;
+  try {
+    await api.sendEmail({ config, notes, transcriptPath, notesPath, sessionDir });
+    setStep('email', 'done');
+    document.getElementById('step-email-detail').textContent = `Sent to ${config.emailTo}`;
+    toast('Meeting notes sent to ' + config.emailTo, 'success');
+  } catch(e) {
+    setStep('email', 'error');
+    document.getElementById('step-email-detail').textContent = 'Email failed (check Settings)';
+    toast('Email failed: ' + e.message, 'error');
+  }
+
+  // Populate results tab
+  lastResults = { transcript, notes, transcriptPath, notesPath, sessionDir };
+  populateResults(lastResults);
+  document.getElementById('record-status').textContent = 'Done! View results →';
+}
+
+function setStep(name, state) {
+  const el = document.getElementById(`step-${name}`);
+  el.className = `step ${state}`;
+  const icons = { done: '✓', active: '↻', error: '✕' };
+  el.querySelector('.step-icon').textContent = icons[state] || '✦';
+}
+
+function resetSteps() {
+  ['transcribe','summarize','save','email'].forEach(n => setStep(n, ''));
+}
+
+// ─── Results ──────────────────────────────────────────────────────────────────
+function populateResults({ transcript, notes, transcriptPath, notesPath, sessionDir }) {
+  document.getElementById('no-results').style.display = 'none';
+  document.getElementById('results-content').style.display = 'block';
+  document.getElementById('notes-output').textContent = notes;
+  document.getElementById('transcript-output').textContent = transcript;
+  document.getElementById('notes-provider-badge').textContent =
+    aiProvider === 'claude' ? 'Claude Opus' : 'GPT-4o';
+  document.getElementById('session-files').innerHTML = [
+    `📁 Session: <code style="color:var(--accent2)">${sessionDir}</code>`,
+    `📝 transcript.txt`,
+    `📋 meeting_notes.md`,
+    `📺 subtitles.srt`,
+    `🎬 recording.webm`
+  ].join('<br>');
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+function applyConfigToForm(cfg) {
+  const fields = ['anthropicKey','openaiKey','whisperModel','smtpHost','smtpPort',
+                  'smtpUser','smtpPass','emailFrom','emailTo'];
+  fields.forEach(f => {
+    const el = document.getElementById(`cfg-${f}`);
+    if (el && cfg[f] !== undefined) el.value = cfg[f];
+  });
+}
+
+async function saveSettings() {
+  const fields = ['anthropicKey','openaiKey','whisperModel','smtpHost','smtpPort',
+                  'smtpUser','smtpPass','emailFrom','emailTo'];
+  fields.forEach(f => {
+    const el = document.getElementById(`cfg-${f}`);
+    if (el) config[f] = el.value;
+  });
+  await api.saveConfig(config);
+  toast('Settings saved', 'success');
+}
+
+async function testEmail() {
+  await saveSettings();
+  try {
+    await api.sendEmail({
+      config,
+      notes: 'This is a test email from Meeting Recorder.',
+      transcriptPath: '',
+      notesPath: '',
+      sessionDir: ''
+    });
+    toast('Test email sent!', 'success');
+  } catch(e) {
+    toast('Test failed: ' + e.message, 'error');
+  }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatTime(s) {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return [h, m, sec].map(n => String(n).padStart(2, '0')).join(':');
+}
+
+let toastTimer;
+function toast(msg, type = 'info') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show ${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 4000);
+}
+</script>
+</body>
+</html>
