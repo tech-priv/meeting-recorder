@@ -1,19 +1,77 @@
 {
   "name": "meeting-recorder",
   "version": "1.0.0",
-  "description": "Record, transcribe and summarize Teams meetings",
+  "description": "Record, transcribe and summarize meetings locally",
   "main": "src/main.js",
   "scripts": {
-    "start": "electron .",
-    "install-whisper": "pip3 install openai-whisper && echo 'Whisper installed'"
+    "start":       "electron .",
+    "build":       "electron-builder --mac --arm64",
+    "build:dmg":   "electron-builder --mac dmg --arm64",
+    "build:pkg":   "electron-builder --mac pkg --arm64",
+    "build:win":   "electron-builder --win --x64",
+    "build:win:portable": "electron-builder --win portable --x64",
+    "build:all":   "electron-builder --mac --arm64 && electron-builder --win --x64"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.24.0",
-    "node-wav": "^0.0.2",
-    "nodemailer": "^6.9.13",
-    "openai": "^4.52.0"
+    "@anthropic-ai/sdk":     "^0.24.0",
+    "@google/generative-ai": "^0.17.0",
+    "node-wav":              "^0.0.2",
+    "nodemailer":            "^6.9.13",
+    "openai":                "^4.52.0"
   },
   "devDependencies": {
-    "electron": "^31.0.0"
+    "electron":         "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId":       "com.meetingrecorder.app",
+    "productName": "Meeting Recorder",
+    "copyright":   "Copyright © 2026",
+
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      { "from": "src/whisper_transcribe.py", "to": "whisper_transcribe.py" }
+    ],
+
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "pkg", "arch": ["arm64"] }
+      ],
+      "icon":                "assets/icon.icns",
+      "entitlements":        "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "hardenedRuntime":     true,
+      "gatekeeperAssess":    false
+    },
+    "dmg": {
+      "title":      "Meeting Recorder",
+      "background": "assets/dmg-background.png",
+      "window":     { "width": 540, "height": 380 },
+      "contents": [
+        { "x": 140, "y": 190, "type": "file" },
+        { "x": 400, "y": 190, "type": "link", "path": "/Applications" }
+      ]
+    },
+
+    "win": {
+      "target": [
+        { "target": "nsis",     "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick":           false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName":       "Meeting Recorder"
+    }
   }
 }

@@ -1,404 +1,413 @@
 <!DOCTYPE html>
+<!--
+  index.html — Meeting Recorder renderer
+
+  Pages:
+    record     — window/audio picker, record button, live preview+VU, pipeline
+    results    — transcript + meeting notes from last session
+    summarize  — post-recording standalone summarization
+    settings   — API keys, SMTP, Whisper model
+    build      — Mac + Windows packaging instructions
+
+  New in this version:
+    - Theme switcher: dark / light / system  (saved to config)
+    - Pipeline step expandable log panels  (real-time via step-log IPC events)
+    - Transcript generation toggle  (default OFF — saves only summary)
+    - Subtitle generation toggle    (default OFF)
+    - Windows 11 build instructions page
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Meeting Recorder</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+/* ═══ Reset ═════════════════════════════════════════════════════════════════ */
+* { box-sizing:border-box; margin:0; padding:0; }
 
-  :root {
-    --bg:         #0f1117;
-    --bg2:        #1a1d27;
-    --bg3:        #22263a;
-    --border:     #2e3348;
-    --accent:     #6366f1;
-    --accent2:    #818cf8;
-    --green:      #22c55e;
-    --red:        #ef4444;
-    --yellow:     #f59e0b;
-    --text:       #e2e8f0;
-    --text2:      #94a3b8;
-    --text3:      #64748b;
-    --radius:     12px;
-    --radius-sm:  8px;
-  }
+/* ═══ Theme tokens ══════════════════════════════════════════════════════════
+   Dark theme is default.  Light theme overrides just the colour variables.
+   "system" applies whichever matches prefers-color-scheme at load time.
+   The <html> element gets data-theme="dark"|"light" set by JS.
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --bg:      #0f1117;
+  --bg2:     #1a1d27;
+  --bg3:     #22263a;
+  --border:  #2e3348;
+  --accent:  #6366f1;
+  --accent2: #818cf8;
+  --green:   #22c55e;
+  --red:     #ef4444;
+  --yellow:  #f59e0b;
+  --gemini:  #4285f4;
+  --text:    #e2e8f0;
+  --text2:   #94a3b8;
+  --text3:   #64748b;
+  --shadow:  rgba(0,0,0,.4);
+  --radius:    12px;
+  --radius-sm:  8px;
+}
+[data-theme="light"] {
+  --bg:      #f8f9fb;
+  --bg2:     #ffffff;
+  --bg3:     #f1f3f8;
+  --border:  #dde1ed;
+  --accent:  #5254cc;
+  --accent2: #6366f1;
+  --green:   #16a34a;
+  --red:     #dc2626;
+  --yellow:  #d97706;
+  --gemini:  #1a73e8;
+  --text:    #0f172a;
+  --text2:   #475569;
+  --text3:   #94a3b8;
+  --shadow:  rgba(0,0,0,.12);
+}
 
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    -webkit-app-region: no-drag;
-  }
+/* ═══ Base ══════════════════════════════════════════════════════════════════ */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+  background: var(--bg); color: var(--text);
+  height:100vh; display:flex; flex-direction:column;
+  overflow:hidden; -webkit-app-region:no-drag;
+  transition: background .2s, color .2s;
+}
 
-  /* ── Titlebar ── */
-  .titlebar {
-    height: 52px;
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    padding: 0 20px 0 80px;
-    -webkit-app-region: drag;
-    gap: 12px;
-    flex-shrink: 0;
-  }
-  .titlebar-logo {
-    width: 28px; height: 28px;
-    background: var(--accent);
-    border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 14px;
-    -webkit-app-region: no-drag;
-  }
-  .titlebar-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text);
-    letter-spacing: -0.01em;
-  }
-  .titlebar-spacer { flex: 1; }
-  .titlebar-btn {
-    -webkit-app-region: no-drag;
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    color: var(--text2);
-    padding: 5px 12px;
-    border-radius: var(--radius-sm);
-    font-size: 12px;
-    cursor: pointer;
-    transition: all .15s;
-  }
-  .titlebar-btn:hover { background: var(--border); color: var(--text); }
+/* ═══ Titlebar ══════════════════════════════════════════════════════════════ */
+.titlebar {
+  height:52px; background:var(--bg); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; padding:0 20px 0 80px;
+  -webkit-app-region:drag; gap:12px; flex-shrink:0;
+}
+.titlebar-logo {
+  width:28px; height:28px; background:var(--accent); border-radius:8px;
+  display:flex; align-items:center; justify-content:center; font-size:14px;
+  -webkit-app-region:no-drag;
+}
+.titlebar-title  { font-size:14px; font-weight:600; letter-spacing:-.01em; }
+.titlebar-spacer { flex:1; }
+.titlebar-btn {
+  -webkit-app-region:no-drag; background:var(--bg3); border:1px solid var(--border);
+  color:var(--text2); padding:5px 12px; border-radius:var(--radius-sm);
+  font-size:12px; cursor:pointer; transition:all .15s;
+}
+.titlebar-btn:hover { background:var(--border); color:var(--text); }
 
-  /* ── Layout ── */
-  .app-body {
-    display: flex;
-    flex: 1;
-    overflow: hidden;
-  }
+/* Theme pill in titlebar */
+.theme-pill {
+  -webkit-app-region:no-drag;
+  display:flex; background:var(--bg3); border:1px solid var(--border);
+  border-radius:99px; overflow:hidden;
+}
+.theme-pill-btn {
+  padding:4px 10px; font-size:11px; cursor:pointer; border:none;
+  background:transparent; color:var(--text3); transition:all .15s;
+}
+.theme-pill-btn.active { background:var(--accent); color:#fff; }
 
-  /* ── Tabs ── */
-  .sidebar {
-    width: 200px;
-    background: var(--bg2);
-    border-right: 1px solid var(--border);
-    padding: 16px 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    flex-shrink: 0;
-  }
-  .tab {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 9px 12px;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    font-size: 13px;
-    color: var(--text2);
-    transition: all .15s;
-    font-weight: 500;
-  }
-  .tab:hover { background: var(--bg3); color: var(--text); }
-  .tab.active { background: var(--accent); color: #fff; }
-  .tab-icon { font-size: 15px; width: 18px; text-align: center; }
+/* ═══ App shell ═════════════════════════════════════════════════════════════ */
+.app-body { display:flex; flex:1; overflow:hidden; }
 
-  /* ── Content ── */
-  .content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 28px;
-  }
-  .page { display: none; }
-  .page.active { display: block; }
+/* ═══ Sidebar ═══════════════════════════════════════════════════════════════ */
+.sidebar {
+  width:200px; background:var(--bg2); border-right:1px solid var(--border);
+  padding:16px 8px; display:flex; flex-direction:column; gap:4px; flex-shrink:0;
+}
+.tab {
+  display:flex; align-items:center; gap:10px; padding:9px 12px;
+  border-radius:var(--radius-sm); cursor:pointer; font-size:13px;
+  color:var(--text2); transition:all .15s; font-weight:500;
+}
+.tab:hover  { background:var(--bg3); color:var(--text); }
+.tab.active { background:var(--accent); color:#fff; }
+.tab-icon   { font-size:15px; width:18px; text-align:center; }
 
-  /* ── Section titles ── */
-  .section-title {
-    font-size: 20px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    margin-bottom: 6px;
-  }
-  .section-sub {
-    font-size: 13px;
-    color: var(--text2);
-    margin-bottom: 24px;
-  }
+/* ═══ Content ═══════════════════════════════════════════════════════════════ */
+.content { flex:1; overflow-y:auto; padding:28px; }
+.page { display:none; }
+.page.active { display:block; }
+.section-title { font-size:20px; font-weight:700; letter-spacing:-.02em; margin-bottom:6px; }
+.section-sub   { font-size:13px; color:var(--text2); margin-bottom:24px; }
 
-  /* ── Cards ── */
-  .card {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px;
-    margin-bottom: 16px;
-  }
-  .card-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text2);
-    text-transform: uppercase;
-    letter-spacing: .06em;
-    margin-bottom: 14px;
-  }
+/* ═══ Cards ═════════════════════════════════════════════════════════════════ */
+.card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px; margin-bottom:16px; }
+.card-title { font-size:13px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.06em; margin-bottom:14px; }
 
-  /* ── Window picker ── */
-  .window-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 12px;
-    max-height: 320px;
-    overflow-y: auto;
-  }
-  .window-item {
-    background: var(--bg3);
-    border: 2px solid var(--border);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    overflow: hidden;
-    transition: all .15s;
-  }
-  .window-item:hover { border-color: var(--accent2); }
-  .window-item.selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,.2); }
-  .window-thumb {
-    width: 100%;
-    aspect-ratio: 16/9;
-    object-fit: cover;
-    display: block;
-    background: #000;
-  }
-  .window-name {
-    padding: 8px 10px;
-    font-size: 12px;
-    color: var(--text2);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .window-item.selected .window-name { color: var(--accent2); }
+/* ═══ Live preview ══════════════════════════════════════════════════════════ */
+.preview-wrap {
+  position:relative; background:#000; border-radius:var(--radius-sm);
+  overflow:hidden; margin-bottom:16px; display:none;
+  border:2px solid var(--red); box-shadow:0 0 0 4px rgba(239,68,68,.12);
+}
+.preview-wrap.visible { display:block; }
+#preview-video { width:100%; max-height:220px; object-fit:contain; display:block; background:#000; }
+.preview-badge {
+  position:absolute; top:10px; left:10px;
+  background:var(--red); color:#fff; font-size:11px; font-weight:700;
+  letter-spacing:.08em; padding:3px 8px; border-radius:99px;
+  display:flex; align-items:center; gap:5px;
+  animation:blink-badge 1.5s step-end infinite;
+}
+@keyframes blink-badge { 0%,100%{opacity:1} 50%{opacity:0} }
+.preview-timer {
+  position:absolute; bottom:10px; right:12px;
+  background:rgba(0,0,0,.65); color:#fff;
+  font-size:15px; font-weight:700; font-variant-numeric:tabular-nums;
+  padding:3px 10px; border-radius:6px; letter-spacing:.04em;
+}
+.preview-vu-wrap  { position:absolute; bottom:10px; left:12px; display:flex; align-items:center; gap:7px; }
+.preview-vu-label { font-size:10px; font-weight:700; letter-spacing:.08em; color:rgba(255,255,255,.7); }
+.preview-vu-track { width:120px; height:8px; background:rgba(255,255,255,.15); border-radius:4px; overflow:hidden; }
+.preview-vu-fill  { height:100%; width:0%; border-radius:4px; background:linear-gradient(to right,#22c55e 0%,#f59e0b 60%,#ef4444 100%); transition:width 60ms linear; }
+.vu-standalone { margin-top:10px; display:none; flex-direction:column; align-items:center; gap:6px; }
+.vu-standalone.visible { display:flex; }
+.vu-standalone-label { font-size:11px; color:var(--text3); }
+.vu-standalone-track { width:200px; height:10px; background:var(--bg3); border:1px solid var(--border); border-radius:5px; overflow:hidden; }
+.vu-standalone-fill  { height:100%; width:0%; border-radius:5px; background:linear-gradient(to right,#22c55e 0%,#f59e0b 60%,#ef4444 100%); transition:width 60ms linear; }
 
-  /* ── Buttons ── */
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    padding: 10px 20px;
-    border-radius: var(--radius-sm);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    border: none;
-    transition: all .15s;
-  }
-  .btn:disabled { opacity: .4; cursor: not-allowed; }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover:not(:disabled) { background: var(--accent2); }
-  .btn-danger  { background: var(--red); color: #fff; }
-  .btn-danger:hover:not(:disabled)  { background: #dc2626; }
-  .btn-ghost   { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
-  .btn-ghost:hover:not(:disabled)   { background: var(--border); }
-  .btn-success { background: var(--green); color: #fff; }
-  .btn-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+/* ═══ Collapsible card header ═══════════════════════════════════════════════ */
+.card-header {
+  display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;
+}
+.card-header .card-title { margin:0; }
+.card-collapse-btn {
+  background:none; border:none; cursor:pointer; color:var(--text3); font-size:12px;
+  padding:2px 6px; border-radius:4px; transition:all .15s; display:flex; align-items:center; gap:5px;
+}
+.card-collapse-btn:hover { background:var(--bg3); color:var(--text); }
+.card-collapse-btn .chevron { display:inline-block; transition:transform .2s; }
+.card-collapse-btn.collapsed .chevron { transform:rotate(-90deg); }
 
-  /* ── Record button ── */
-  .record-btn-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    padding: 28px 0 20px;
-  }
-  .record-btn {
-    width: 80px; height: 80px;
-    border-radius: 50%;
-    border: none;
-    cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 28px;
-    transition: all .2s;
-    background: var(--accent);
-    box-shadow: 0 0 0 0 rgba(99,102,241,.4);
-  }
-  .record-btn.recording {
-    background: var(--red);
-    animation: pulse 1.5s infinite;
-  }
-  .record-btn:hover:not(:disabled) { transform: scale(1.07); }
-  .record-btn:disabled { opacity: .4; cursor: not-allowed; }
-  @keyframes pulse {
-    0%   { box-shadow: 0 0 0 0   rgba(239,68,68,.5); }
-    70%  { box-shadow: 0 0 0 18px rgba(239,68,68,0); }
-    100% { box-shadow: 0 0 0 0   rgba(239,68,68,0); }
-  }
-  .record-timer {
-    font-size: 28px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: .02em;
-    color: var(--text);
-  }
-  .record-status {
-    font-size: 13px;
-    color: var(--text2);
-  }
-  .record-status.live { color: var(--red); font-weight: 600; }
+/* ═══ Window picker toolbar ═════════════════════════════════════════════════ */
+.window-toolbar { display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+.view-toggle { display:flex; background:var(--bg3); border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; }
+.view-toggle-btn { padding:5px 11px; font-size:13px; cursor:pointer; color:var(--text2); border:none; background:transparent; transition:all .15s; }
+.view-toggle-btn.active { background:var(--accent); color:#fff; }
+.spacer-auto { flex:1; }
+.window-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:12px; max-height:300px; overflow-y:auto; }
+.window-grid.hidden { display:none; }
+.window-item { background:var(--bg3); border:2px solid var(--border); border-radius:var(--radius-sm); cursor:pointer; overflow:hidden; transition:all .15s; }
+.window-item:hover { border-color:var(--accent2); }
+.window-item.selected { border-color:var(--accent); box-shadow:0 0 0 3px rgba(99,102,241,.2); }
+.window-thumb { width:100%; aspect-ratio:16/9; object-fit:cover; display:block; background:#000; }
+.window-name  { padding:7px 10px; font-size:12px; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.window-item.selected .window-name { color:var(--accent2); }
+.window-list { display:flex; flex-direction:column; gap:4px; max-height:300px; overflow-y:auto; }
+.window-list.hidden { display:none; }
+.window-list-item { display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--bg3); border:2px solid var(--border); border-radius:var(--radius-sm); cursor:pointer; transition:all .15s; }
+.window-list-item:hover    { border-color:var(--accent2); }
+.window-list-item.selected { border-color:var(--accent); background:rgba(99,102,241,.08); }
+.window-list-num { min-width:22px; height:22px; border-radius:6px; background:var(--bg); border:1px solid var(--border); color:var(--text3); font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.window-list-item.selected .window-list-num { background:var(--accent); border-color:var(--accent); color:#fff; }
+.window-list-thumb { width:64px; height:36px; object-fit:cover; border-radius:4px; background:#000; flex-shrink:0; }
+.window-list-info  { flex:1; min-width:0; }
+.window-list-name  { font-size:13px; font-weight:500; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.window-list-type  { font-size:11px; color:var(--text3); margin-top:2px; }
+.window-list-item.selected .window-list-name { color:var(--accent2); }
 
-  /* ── Pipeline steps ── */
-  .pipeline {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-top: 8px;
-  }
-  .step {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 12px 16px;
-    background: var(--bg3);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    font-size: 13px;
-    color: var(--text2);
-  }
-  .step-icon {
-    width: 28px; height: 28px;
-    border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 13px;
-    background: var(--border);
-    flex-shrink: 0;
-  }
-  .step.done   .step-icon { background: var(--green); color: #fff; }
-  .step.active .step-icon { background: var(--accent); color: #fff; animation: spin .8s linear infinite; }
-  .step.error  .step-icon { background: var(--red); color: #fff; }
-  .step.done   { border-color: rgba(34,197,94,.3); }
-  .step.active { border-color: rgba(99,102,241,.4); color: var(--text); }
-  .step.error  { border-color: rgba(239,68,68,.3); }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .step-label { flex: 1; font-weight: 500; }
-  .step-detail { font-size: 11px; color: var(--text3); }
+/* ═══ Audio device list ═════════════════════════════════════════════════════ */
+.audio-device-list { display:flex; flex-direction:column; gap:4px; }
+.audio-device-item { display:flex; align-items:center; gap:12px; padding:9px 14px; background:var(--bg3); border:2px solid var(--border); border-radius:var(--radius-sm); cursor:pointer; transition:all .15s; }
+.audio-device-item:hover    { border-color:var(--accent2); }
+.audio-device-item.selected { border-color:var(--accent); background:rgba(99,102,241,.08); }
+.audio-device-icon { font-size:16px; flex-shrink:0; }
+.audio-device-info { flex:1; min-width:0; }
+.audio-device-name { font-size:13px; font-weight:500; color:var(--text); }
+.audio-device-item.selected .audio-device-name { color:var(--accent2); }
+.audio-device-sub  { font-size:11px; color:var(--text3); margin-top:2px; }
+.audio-device-check { font-size:14px; color:var(--accent2); }
 
-  /* ── Transcript output ── */
-  .output-box {
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 16px;
-    font-size: 13px;
-    line-height: 1.7;
-    color: var(--text);
-    white-space: pre-wrap;
-    max-height: 300px;
-    overflow-y: auto;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-  }
-  .notes-box {
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 20px;
-    font-size: 13.5px;
-    line-height: 1.8;
-    color: var(--text);
-    white-space: pre-wrap;
-    max-height: 360px;
-    overflow-y: auto;
-  }
+/* ═══ Buttons ═══════════════════════════════════════════════════════════════ */
+.btn { display:inline-flex; align-items:center; gap:7px; padding:10px 20px; border-radius:var(--radius-sm); font-size:13px; font-weight:600; cursor:pointer; border:none; transition:all .15s; }
+.btn:disabled { opacity:.4; cursor:not-allowed; }
+.btn-primary { background:var(--accent); color:#fff; }
+.btn-primary:hover:not(:disabled) { background:var(--accent2); }
+.btn-danger  { background:var(--red);    color:#fff; }
+.btn-danger:hover:not(:disabled)  { background:#b91c1c; }
+.btn-ghost   { background:var(--bg3);   color:var(--text); border:1px solid var(--border); }
+.btn-ghost:hover:not(:disabled)   { background:var(--border); }
+.btn-warn    { background:var(--yellow); color:#000; }
+.btn-warn:hover:not(:disabled)    { background:#b45309; color:#fff; }
+.btn-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 
-  /* ── Settings form ── */
-  .form-group { margin-bottom: 16px; }
-  .form-label {
-    display: block;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text2);
-    text-transform: uppercase;
-    letter-spacing: .05em;
-    margin-bottom: 6px;
-  }
-  .form-input, .form-select {
-    width: 100%;
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 9px 12px;
-    color: var(--text);
-    font-size: 13px;
-    outline: none;
-    transition: border-color .15s;
-    font-family: inherit;
-  }
-  .form-input:focus, .form-select:focus { border-color: var(--accent); }
-  .form-input[type=password] { letter-spacing: .1em; }
-  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .form-hint { font-size: 11px; color: var(--text3); margin-top: 4px; }
+/* ═══ Record button ═════════════════════════════════════════════════════════ */
+.record-btn-wrap { display:flex; flex-direction:column; align-items:center; gap:12px; padding:28px 0 20px; }
+.record-btn { width:80px; height:80px; border-radius:50%; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:28px; transition:all .2s; background:var(--accent); }
+.record-btn.recording { background:var(--red); animation:pulse 1.5s infinite; }
+.record-btn:hover:not(:disabled) { transform:scale(1.07); }
+.record-btn:disabled { opacity:.4; cursor:not-allowed; }
+@keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(239,68,68,.5)} 70%{box-shadow:0 0 0 18px rgba(239,68,68,0)} 100%{box-shadow:0 0 0 0 rgba(239,68,68,0)} }
+.record-timer  { font-size:28px; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:.02em; }
+.record-status { font-size:13px; color:var(--text2); }
+.record-status.live { color:var(--red); font-weight:600; }
 
-  /* ── Provider toggle ── */
-  .toggle-row {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
-  }
-  .toggle-opt {
-    flex: 1;
-    padding: 9px;
-    background: var(--bg3);
-    border: 2px solid var(--border);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    text-align: center;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text2);
-    transition: all .15s;
-  }
-  .toggle-opt.selected { border-color: var(--accent); color: var(--accent2); background: rgba(99,102,241,.1); }
+/* ═══ Provider toggles ══════════════════════════════════════════════════════ */
+.toggle-row { display:flex; gap:8px; margin-bottom:8px; }
+.toggle-opt { flex:1; padding:9px; background:var(--bg3); border:2px solid var(--border); border-radius:var(--radius-sm); cursor:pointer; text-align:center; font-size:13px; font-weight:600; color:var(--text2); transition:all .15s; }
+.toggle-opt:hover { border-color:var(--accent2); color:var(--text); }
+.toggle-opt.selected        { border-color:var(--accent); color:var(--accent2); background:rgba(99,102,241,.1); }
+.toggle-opt.selected-gemini { border-color:var(--gemini); color:#7baaf7; background:rgba(66,133,244,.1); }
 
-  /* ── Toast ── */
-  #toast {
-    position: fixed;
-    bottom: 20px; right: 20px;
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 12px 18px;
-    font-size: 13px;
-    color: var(--text);
-    display: none;
-    z-index: 999;
-    max-width: 320px;
-    box-shadow: 0 8px 24px rgba(0,0,0,.4);
-  }
-  #toast.show { display: block; }
-  #toast.success { border-color: rgba(34,197,94,.5); }
-  #toast.error   { border-color: rgba(239,68,68,.5); }
+/* ═══ Toggle switches ═══════════════════════════════════════════════════════ */
+.option-row { display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:var(--bg3); border:1px solid var(--border); border-radius:var(--radius-sm); margin-bottom:12px; }
+.option-row-label    { font-size:13px; font-weight:500; color:var(--text); }
+.option-row-sublabel { font-size:11px; color:var(--text3); margin-top:2px; }
+.switch { position:relative; display:inline-block; width:42px; height:24px; }
+.switch input { opacity:0; width:0; height:0; }
+.slider { position:absolute; cursor:pointer; inset:0; background:var(--border); border-radius:24px; transition:.2s; }
+.slider:before { position:absolute; content:""; height:18px; width:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:.2s; }
+input:checked + .slider { background:var(--accent); }
+input:checked + .slider:before { transform:translateX(18px); }
+.collapsible-panel { overflow:hidden; max-height:500px; transition:max-height .25s ease,opacity .2s; }
+.collapsible-panel.collapsed { max-height:0; opacity:0; pointer-events:none; }
 
-  /* ── Badge ── */
-  .badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 99px;
-    font-size: 11px;
-    font-weight: 600;
-  }
-  .badge-green  { background: rgba(34,197,94,.15);  color: var(--green); }
-  .badge-yellow { background: rgba(245,158,11,.15); color: var(--yellow); }
-  .badge-blue   { background: rgba(99,102,241,.15); color: var(--accent2); }
+/* ═══ Pipeline steps ════════════════════════════════════════════════════════ */
+.pipeline { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
 
-  /* ── Divider ── */
-  .divider { height: 1px; background: var(--border); margin: 20px 0; }
+.step {
+  background:var(--bg3); border:1px solid var(--border);
+  border-radius:var(--radius-sm); overflow:hidden;
+  transition:border-color .2s;
+}
+/* Step header row */
+.step-header {
+  display:flex; align-items:center; gap:14px; padding:12px 16px;
+  font-size:13px; color:var(--text2); position:relative;
+  cursor:pointer; user-select:none;
+}
+.step-header:hover .step-expand-btn { opacity:1; }
+/* Animated fill bar */
+.step-progress {
+  position:absolute; left:0; top:0; bottom:0; width:0%;
+  background:rgba(99,102,241,.07); transition:width .4s ease; pointer-events:none;
+}
+.step.active .step-progress { animation:step-pulse 2s ease-in-out infinite; }
+.step.done   .step-progress { width:100%; background:rgba(34,197,94,.08); }
+.step.error  .step-progress { width:100%; background:rgba(239,68,68,.08); }
+@keyframes step-pulse { 0%,100%{width:25%} 50%{width:70%} }
+.step-icon {
+  width:28px; height:28px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  font-size:13px; background:var(--border); flex-shrink:0; position:relative; z-index:1;
+}
+.step.done   .step-icon { background:var(--green);  color:#fff; }
+.step.active .step-icon { background:var(--accent); color:#fff; animation:spin .8s linear infinite; }
+.step.error  .step-icon { background:var(--red);    color:#fff; }
+.step.skipped .step-icon { background:var(--bg3); color:var(--text3); border:1px dashed var(--border); }
+.step.done   { border-color:rgba(34,197,94,.3); }
+.step.active { border-color:rgba(99,102,241,.4); color:var(--text); }
+.step.error  { border-color:rgba(239,68,68,.4); }
+.step.skipped{ opacity:.5; }
+@keyframes spin { to{transform:rotate(360deg)} }
+.step-body   { flex:1; position:relative; z-index:1; }
+.step-label  { font-weight:500; }
+.step-detail { font-size:11px; color:var(--text3); margin-top:2px; }
 
-  /* Scrollbar */
-  ::-webkit-scrollbar { width: 6px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+/* Expand/collapse chevron */
+.step-expand-btn {
+  position:relative; z-index:1; font-size:11px; color:var(--text3);
+  opacity:0.5; transition:all .15s; margin-left:auto; flex-shrink:0;
+  background:none; border:none; cursor:pointer; padding:2px 6px;
+}
+.step-expand-btn.open { opacity:1; transform:rotate(180deg); }
+
+/* Expandable log panel per step */
+.step-log-panel {
+  max-height:0; overflow:hidden;
+  transition:max-height .25s ease;
+  border-top:0px solid var(--border);
+}
+.step-log-panel.open {
+  max-height:240px;
+  border-top:1px solid var(--border);
+}
+.step-log-inner {
+  padding:10px 14px;
+  font-family:'SF Mono','Fira Code','Consolas',monospace;
+  font-size:11px; line-height:1.7; color:var(--text3);
+  max-height:220px; overflow-y:auto;
+  white-space:pre-wrap; word-break:break-all;
+  background:var(--bg);
+}
+.step-log-inner .log-line-error { color:var(--red); }
+.step-log-inner .log-line-warn  { color:var(--yellow); }
+.step-log-inner .log-line-ok    { color:var(--green); }
+.step-log-empty { color:var(--text3); font-style:italic; }
+
+/* ═══ Generic progress bar (used by standalone summarize) ══════════════════ */
+.overall-progress-bar  { height:6px; background:var(--bg3); border-radius:3px; overflow:hidden; }
+.overall-progress-fill { height:100%; background:var(--accent); border-radius:3px; transition:width .4s ease; width:0%; }
+
+/* ═══ Pipeline status line ═══════════════════════════════════════════════════
+   Deliberately neutral — no red/green border coloring at the card level.
+   Status is communicated through the individual step icons only.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.pipeline-status-line {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:8px 0; margin-bottom:14px; font-size:13px;
+}
+.pipeline-status-label { color:var(--text2); font-size:13px; }
+.pipeline-status-pct   { font-size:12px; font-weight:600; color:var(--text3); font-variant-numeric:tabular-nums; }
+
+/* ═══ Error panel ═══════════════════════════════════════════════════════════ */
+.error-panel { margin-top:16px; background:rgba(239,68,68,.06); border:1px solid rgba(239,68,68,.3); border-radius:var(--radius-sm); padding:16px; display:none; }
+.error-panel.visible { display:block; }
+.error-panel-title { font-size:13px; font-weight:700; color:var(--red); margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+.error-log-path { font-size:11px; color:var(--text3); margin-bottom:10px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.error-log-path code { color:var(--accent2); font-family:'SF Mono',monospace; word-break:break-all; }
+.log-box { background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:12px; font-family:'SF Mono','Fira Code','Consolas',monospace; font-size:11px; color:var(--text2); max-height:220px; overflow-y:auto; white-space:pre-wrap; line-height:1.6; margin-bottom:14px; }
+.log-box .log-error { color:var(--red); }
+
+/* ═══ Text outputs ══════════════════════════════════════════════════════════ */
+.output-box { background:var(--bg3); border:1px solid var(--border); border-radius:var(--radius-sm); padding:16px; font-size:13px; line-height:1.7; color:var(--text); white-space:pre-wrap; max-height:300px; overflow-y:auto; font-family:'SF Mono','Fira Code','Consolas',monospace; }
+.notes-box  { background:var(--bg3); border:1px solid var(--border); border-radius:var(--radius-sm); padding:20px; font-size:13.5px; line-height:1.8; color:var(--text); white-space:pre-wrap; max-height:360px; overflow-y:auto; }
+
+/* ═══ Forms ═════════════════════════════════════════════════════════════════ */
+.form-group  { margin-bottom:16px; }
+.form-label  { display:block; font-size:12px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+.form-input, .form-select { width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:var(--radius-sm); padding:9px 12px; color:var(--text); font-size:13px; outline:none; transition:border-color .15s; font-family:inherit; }
+.form-input:focus, .form-select:focus { border-color:var(--accent); }
+.form-row  { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.form-hint { font-size:11px; color:var(--text3); margin-top:4px; }
+textarea.form-input { min-height:120px; resize:vertical; }
+
+/* ═══ Badges ════════════════════════════════════════════════════════════════ */
+.badge { display:inline-block; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:600; }
+.badge-blue   { background:rgba(99,102,241,.15); color:var(--accent2); }
+.badge-green  { background:rgba(34,197,94,.15);  color:var(--green); }
+.badge-gemini { background:rgba(66,133,244,.15); color:#7baaf7; }
+
+/* ═══ Info note ═════════════════════════════════════════════════════════════ */
+.info-note { background:rgba(99,102,241,.07); border:1px solid rgba(99,102,241,.2); border-radius:var(--radius-sm); padding:12px 16px; font-size:12px; color:var(--text2); margin-bottom:16px; line-height:1.6; }
+
+/* ═══ Build page ════════════════════════════════════════════════════════════ */
+.build-step    { display:flex; align-items:flex-start; gap:14px; padding:14px 16px; background:var(--bg3); border:1px solid var(--border); border-radius:var(--radius-sm); margin-bottom:8px; }
+.build-num     { width:24px; height:24px; border-radius:50%; background:var(--accent); color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px; }
+.build-content { flex:1; }
+.build-title   { font-size:13px; font-weight:600; color:var(--text); margin-bottom:4px; }
+.build-desc    { font-size:12px; color:var(--text2); line-height:1.5; }
+.build-cmd     { background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px 12px; font-family:'SF Mono','Consolas',monospace; font-size:12px; color:var(--accent2); margin-top:8px; display:block; white-space:pre; overflow-x:auto; }
+
+/* Build platform tabs */
+.build-tabs { display:flex; gap:4px; margin-bottom:16px; background:var(--bg3); border:1px solid var(--border); border-radius:var(--radius-sm); padding:4px; }
+.build-tab  { flex:1; padding:7px; text-align:center; font-size:13px; font-weight:600; cursor:pointer; border-radius:6px; color:var(--text2); transition:all .15s; }
+.build-tab.active { background:var(--accent); color:#fff; }
+.build-panel { display:none; }
+.build-panel.active { display:block; }
+
+/* ═══ Divider ═══════════════════════════════════════════════════════════════ */
+.divider { height:1px; background:var(--border); margin:20px 0; }
+
+/* ═══ Toast ═════════════════════════════════════════════════════════════════ */
+#toast { position:fixed; bottom:20px; right:20px; background:var(--bg3); border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px 18px; font-size:13px; color:var(--text); display:none; z-index:999; max-width:340px; box-shadow:0 8px 24px var(--shadow); }
+#toast.show    { display:block; }
+#toast.success { border-color:rgba(34,197,94,.5); }
+#toast.error   { border-color:rgba(239,68,68,.5); }
+
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
 </style>
 </head>
 <body>
@@ -408,116 +417,277 @@
   <div class="titlebar-logo">🎙</div>
   <span class="titlebar-title">Meeting Recorder</span>
   <div class="titlebar-spacer"></div>
+  <!-- Theme switcher -->
+  <div class="theme-pill" title="App theme">
+    <button class="theme-pill-btn" id="theme-dark"   onclick="setTheme('dark')">🌙</button>
+    <button class="theme-pill-btn" id="theme-light"  onclick="setTheme('light')">☀️</button>
+    <button class="theme-pill-btn" id="theme-system" onclick="setTheme('system')">⬡</button>
+  </div>
   <button class="titlebar-btn" onclick="api.openRecordings()">📁 Recordings</button>
 </div>
 
-<!-- Body -->
 <div class="app-body">
-
   <!-- Sidebar -->
   <nav class="sidebar">
-    <div class="tab active" data-page="record" onclick="switchTab('record')">
-      <span class="tab-icon">⏺</span> Record
-    </div>
-    <div class="tab" data-page="results" onclick="switchTab('results')">
-      <span class="tab-icon">📄</span> Results
-    </div>
-    <div class="tab" data-page="settings" onclick="switchTab('settings')">
-      <span class="tab-icon">⚙️</span> Settings
-    </div>
+    <div class="tab active" data-page="record"    onclick="switchTab('record')">   <span class="tab-icon">⏺</span> Record    </div>
+    <div class="tab"        data-page="results"   onclick="switchTab('results')">  <span class="tab-icon">📄</span> Results   </div>
+    <div class="tab"        data-page="summarize" onclick="switchTab('summarize')"><span class="tab-icon">✨</span> Summarize </div>
+    <div class="tab"        data-page="settings"  onclick="switchTab('settings')"> <span class="tab-icon">⚙️</span> Settings  </div>
+    <div class="tab"        data-page="build"     onclick="switchTab('build')">    <span class="tab-icon">📦</span> Build App </div>
+    <div class="tab"        data-page="test"      onclick="switchTab('test')">     <span class="tab-icon">🧪</span> Test Setup </div>
   </nav>
 
-  <!-- Content -->
   <div class="content">
 
-    <!-- ── RECORD PAGE ── -->
+    <!-- ══════════════════════════════════════════════════════════════
+         RECORD PAGE
+         ══════════════════════════════════════════════════════════════ -->
     <div id="page-record" class="page active">
       <div class="section-title">Record a Meeting</div>
-      <div class="section-sub">Select the window to capture, then press record.</div>
+      <div class="section-sub">Pick a window and audio source, configure options, then record.</div>
+
+      <!-- Live preview (shown while recording) -->
+      <div class="preview-wrap" id="preview-wrap">
+        <video id="preview-video" muted playsinline></video>
+        <div class="preview-badge">⏺ REC</div>
+        <div class="preview-timer" id="preview-timer">00:00:00</div>
+        <div class="preview-vu-wrap">
+          <span class="preview-vu-label">IN</span>
+          <div class="preview-vu-track"><div class="preview-vu-fill" id="preview-vu-fill"></div></div>
+        </div>
+      </div>
 
       <!-- Window picker -->
       <div class="card">
-        <div class="card-title">Select Window to Capture</div>
-        <div style="margin-bottom:12px" class="btn-row">
-          <button class="btn btn-ghost" onclick="refreshWindows()">🔄 Refresh Windows</button>
-          <span id="selected-window-label" style="font-size:13px;color:var(--text2)">No window selected</span>
+        <div class="card-header">
+          <div class="card-title">Screen / Window</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span id="selected-window-label" style="font-size:12px;color:var(--text2)">No window selected</span>
+            <button class="card-collapse-btn" id="window-card-collapse-btn" onclick="toggleCardSection('window-card-body','window-card-collapse-btn')" title="Collapse">
+              <span class="chevron">▼</span>
+            </button>
+          </div>
         </div>
-        <div class="window-grid" id="window-grid">
-          <div style="color:var(--text3);font-size:13px;padding:20px">Click "Refresh Windows" to load available windows.</div>
+        <div id="window-card-body">
+          <div class="window-toolbar">
+            <button class="btn btn-ghost" onclick="refreshWindows()" style="padding:6px 14px;font-size:12px">🔄 Refresh</button>
+            <div class="spacer-auto"></div>
+            <div class="view-toggle">
+              <button class="view-toggle-btn active" id="view-grid-btn" onclick="setViewMode('grid')" title="Grid view">⊞</button>
+              <button class="view-toggle-btn"        id="view-list-btn" onclick="setViewMode('list')" title="List view">☰</button>
+            </div>
+          </div>
+          <div class="window-grid" id="window-grid"><div style="color:var(--text3);font-size:13px;padding:20px;grid-column:1/-1">Loading…</div></div>
+          <div class="window-list hidden" id="window-list"><div style="color:var(--text3);font-size:13px;padding:16px">Loading…</div></div>
         </div>
       </div>
 
-      <!-- AI Provider for this session -->
+      <!-- Audio device picker -->
       <div class="card">
-        <div class="card-title">AI Provider for Summary</div>
-        <div class="toggle-row">
-          <div class="toggle-opt selected" id="opt-claude" onclick="selectProvider('claude')">🟣 Claude</div>
-          <div class="toggle-opt" id="opt-chatgpt" onclick="selectProvider('chatgpt')">🟢 ChatGPT</div>
+        <div class="card-header">
+          <div class="card-title">Audio Input</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span id="selected-audio-label" style="font-size:12px;color:var(--text2)">No device selected</span>
+            <button class="card-collapse-btn" id="audio-card-collapse-btn" onclick="toggleCardSection('audio-card-body','audio-card-collapse-btn')" title="Collapse">
+              <span class="chevron">▼</span>
+            </button>
+          </div>
         </div>
-        <div style="font-size:12px;color:var(--text3)">API keys are configured in Settings.</div>
+        <div id="audio-card-body">
+          <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+            <button class="btn btn-ghost" onclick="refreshAudioDevices()" style="padding:6px 14px;font-size:12px">🔄 Refresh</button>
+          </div>
+          <div class="audio-device-list" id="audio-device-list">
+            <div style="color:var(--text3);font-size:13px;padding:12px">Loading…</div>
+          </div>
+        </div>
       </div>
 
-      <!-- Record control -->
+      <!-- Output options — what to generate -->
+      <div class="card">
+        <div class="card-title">Output Options</div>
+
+        <!-- Summary is ON by default and most important -->
+        <div class="option-row">
+          <div>
+            <div class="option-row-label">AI Summary <span style="font-size:10px;color:var(--accent2);margin-left:6px">recommended</span></div>
+            <div class="option-row-sublabel">Generate structured meeting notes after transcription</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="enable-summary" onchange="enableSummary=this.checked; togglePanel('provider-panel', this.checked)"/>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="collapsible-panel" id="provider-panel">
+          <div style="font-size:12px;color:var(--text2);margin-bottom:8px;font-weight:500;padding:0 2px">AI Provider</div>
+          <div class="toggle-row">
+            <div class="toggle-opt selected" id="opt-claude"  onclick="selectProvider('claude')">🟣 Claude</div>
+            <div class="toggle-opt"          id="opt-chatgpt" onclick="selectProvider('chatgpt')">🟢 ChatGPT</div>
+            <div class="toggle-opt"          id="opt-gemini"  onclick="selectProvider('gemini')">🔵 Gemini</div>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:14px">Configure API keys in ⚙️ Settings.</div>
+        </div>
+
+        <!-- Transcript — OFF by default -->
+        <div class="option-row">
+          <div>
+            <div class="option-row-label">Save Transcript</div>
+            <div class="option-row-sublabel">Write raw transcript.txt to the session folder</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="enable-transcript" checked onchange="enableTranscript=this.checked"/>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <!-- Subtitles — OFF by default -->
+        <div class="option-row" style="margin-bottom:0">
+          <div>
+            <div class="option-row-label">Generate Subtitles</div>
+            <div class="option-row-sublabel">Write subtitles.srt with timestamped captions</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="enable-subtitles" onchange="enableSubtitles=this.checked"/>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Email Delivery -->
+      <div class="card">
+        <div class="card-title">Email Delivery</div>
+        <div class="option-row" style="margin-bottom:0">
+          <div>
+            <div class="option-row-label">Send email after recording</div>
+            <div class="option-row-sublabel">Emails notes + attachments to the address in Settings</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="enable-email" onchange="enableEmail=this.checked"/>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Record button -->
       <div class="card">
         <div class="card-title">Recording</div>
         <div class="record-btn-wrap">
-          <button class="record-btn" id="record-btn" onclick="toggleRecording()" disabled title="Select a window first">
-            ⏺
-          </button>
+          <button class="record-btn" id="record-btn" onclick="toggleRecording()" disabled>⏺</button>
           <div class="record-timer" id="record-timer">00:00:00</div>
           <div class="record-status" id="record-status">Select a window to start</div>
+          <div class="vu-standalone" id="vu-standalone">
+            <div class="vu-standalone-label">Audio input level</div>
+            <div class="vu-standalone-track"><div class="vu-standalone-fill" id="vu-standalone-fill"></div></div>
+          </div>
         </div>
       </div>
 
-      <!-- Pipeline status (hidden until recording stops) -->
+      <!-- Pipeline card -->
       <div class="card" id="pipeline-card" style="display:none">
         <div class="card-title">Processing Pipeline</div>
+
+        <div class="pipeline-status-line" id="pipeline-status-line">
+          <span class="pipeline-status-label" id="overall-label">Starting…</span>
+          <span class="pipeline-status-pct"   id="overall-pct">0%</span>
+        </div>
+
         <div class="pipeline">
+          <!-- Each step has a clickable header + expandable log panel -->
+
           <div class="step" id="step-transcribe">
-            <div class="step-icon">✦</div>
-            <div>
-              <div class="step-label">Transcribing audio</div>
-              <div class="step-detail">Local Whisper on Apple Silicon</div>
+            <div class="step-progress"></div>
+            <div class="step-header" onclick="toggleStepLog('transcribe')">
+              <div class="step-icon">✦</div>
+              <div class="step-body">
+                <div class="step-label">Transcribing audio</div>
+                <div class="step-detail" id="step-transcribe-detail">Local Whisper on Apple Silicon</div>
+              </div>
+              <button class="step-expand-btn" id="expand-btn-transcribe" title="Show logs">▼</button>
+            </div>
+            <div class="step-log-panel" id="step-log-transcribe">
+              <div class="step-log-inner" id="step-log-inner-transcribe"><span class="step-log-empty">Logs will appear here when this step runs.</span></div>
             </div>
           </div>
+
           <div class="step" id="step-summarize">
-            <div class="step-icon">✦</div>
-            <div>
-              <div class="step-label">Generating meeting notes</div>
-              <div class="step-detail" id="step-summarize-detail">Waiting…</div>
+            <div class="step-progress"></div>
+            <div class="step-header" onclick="toggleStepLog('summarize')">
+              <div class="step-icon">✦</div>
+              <div class="step-body">
+                <div class="step-label">Generating meeting notes</div>
+                <div class="step-detail" id="step-summarize-detail">Waiting…</div>
+              </div>
+              <button class="step-expand-btn" id="expand-btn-summarize" title="Show logs">▼</button>
+            </div>
+            <div class="step-log-panel" id="step-log-summarize">
+              <div class="step-log-inner" id="step-log-inner-summarize"><span class="step-log-empty">Logs will appear here when this step runs.</span></div>
             </div>
           </div>
+
           <div class="step" id="step-save">
-            <div class="step-icon">✦</div>
-            <div>
-              <div class="step-label">Saving files</div>
-              <div class="step-detail">transcript.txt · meeting_notes.md · subtitles.srt</div>
+            <div class="step-progress"></div>
+            <div class="step-header" onclick="toggleStepLog('save')">
+              <div class="step-icon">✦</div>
+              <div class="step-body">
+                <div class="step-label">Saving files</div>
+                <div class="step-detail" id="step-save-detail">meeting_notes.md</div>
+              </div>
+              <button class="step-expand-btn" id="expand-btn-save" title="Show logs">▼</button>
+            </div>
+            <div class="step-log-panel" id="step-log-save">
+              <div class="step-log-inner" id="step-log-inner-save"><span class="step-log-empty">Logs will appear here when this step runs.</span></div>
             </div>
           </div>
+
           <div class="step" id="step-email">
-            <div class="step-icon">✦</div>
-            <div>
-              <div class="step-label">Sending email</div>
-              <div class="step-detail" id="step-email-detail">Waiting…</div>
+            <div class="step-progress"></div>
+            <div class="step-header" onclick="toggleStepLog('email')">
+              <div class="step-icon">✦</div>
+              <div class="step-body">
+                <div class="step-label">Sending email</div>
+                <div class="step-detail" id="step-email-detail">Waiting…</div>
+              </div>
+              <button class="step-expand-btn" id="expand-btn-email" title="Show logs">▼</button>
+            </div>
+            <div class="step-log-panel" id="step-log-email">
+              <div class="step-log-inner" id="step-log-inner-email"><span class="step-log-empty">Logs will appear here when this step runs.</span></div>
             </div>
           </div>
         </div>
-        <div class="divider"></div>
-        <div class="btn-row">
-          <button class="btn btn-ghost" onclick="switchTab('results')">View Results →</button>
+
+        <!-- Error panel -->
+        <div class="error-panel" id="error-panel">
+          <div class="error-panel-title">⚠️ <span id="error-panel-title-text">Step failed</span></div>
+          <div class="error-log-path">
+            📄 Log: <code id="error-log-path-text"></code>
+            <button class="btn btn-ghost" style="padding:3px 10px;font-size:11px" onclick="revealLog()">Show in Finder</button>
+          </div>
+          <div class="log-box" id="log-box">Loading log…</div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="retryFromFailed()">↩ Retry from this step</button>
+            <button class="btn btn-warn"    onclick="restartPipeline()">⟳ Restart whole pipeline</button>
+            <button class="btn btn-danger"  onclick="cancelPipeline()">✕ Cancel</button>
+          </div>
+        </div>
+
+        <!-- Success actions -->
+        <div id="pipeline-success-actions" style="display:none">
+          <div class="divider"></div>
+          <div class="btn-row">
+            <button class="btn btn-ghost" onclick="switchTab('results')">View Results →</button>
+          </div>
         </div>
       </div>
-    </div>
+    </div><!-- /page-record -->
 
-    <!-- ── RESULTS PAGE ── -->
+
+    <!-- ══════════════════════════════════════════════════════════════
+         RESULTS PAGE
+         ══════════════════════════════════════════════════════════════ -->
     <div id="page-results" class="page">
       <div class="section-title">Results</div>
       <div class="section-sub">Transcript and meeting notes from the last session.</div>
-
-      <div id="no-results" style="color:var(--text2);font-size:14px;padding:20px 0">
-        No results yet. Record a meeting first.
-      </div>
-
+      <div id="no-results" style="color:var(--text2);font-size:14px;padding:20px 0">No results yet. Record a meeting first.</div>
       <div id="results-content" style="display:none">
         <div class="card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
@@ -526,35 +696,95 @@
           </div>
           <div class="notes-box" id="notes-output"></div>
         </div>
-
-        <div class="card">
+        <div class="card" id="result-transcript-card" style="display:none">
           <div class="card-title">Raw Transcript</div>
           <div class="output-box" id="transcript-output"></div>
         </div>
-
         <div class="card">
           <div class="card-title">Session Files</div>
-          <div id="session-files" style="font-size:13px;color:var(--text2);line-height:2"></div>
+          <div id="session-files" style="font-size:13px;color:var(--text2);line-height:2.2"></div>
           <div class="divider"></div>
           <button class="btn btn-ghost" onclick="api.openRecordings()">📁 Open in Finder</button>
         </div>
       </div>
-    </div>
+    </div><!-- /page-results -->
 
-    <!-- ── SETTINGS PAGE ── -->
+
+    <!-- ══════════════════════════════════════════════════════════════
+         SUMMARIZE PAGE
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="page-summarize" class="page">
+      <div class="section-title">Summarize a Recording</div>
+      <div class="section-sub">Generate AI notes from any existing transcript — useful when summarization was skipped, or to retry with a different provider.</div>
+      <div class="card">
+        <div class="card-title">AI Provider</div>
+        <div class="toggle-row">
+          <div class="toggle-opt selected" id="sum-opt-claude"  onclick="selectSumProvider('claude')">🟣 Claude</div>
+          <div class="toggle-opt"          id="sum-opt-chatgpt" onclick="selectSumProvider('chatgpt')">🟢 ChatGPT</div>
+          <div class="toggle-opt"          id="sum-opt-gemini"  onclick="selectSumProvider('gemini')">🔵 Gemini</div>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px">Configure API keys in ⚙️ Settings.</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Transcript</div>
+        <div class="info-note">Paste text below or load a <code>transcript.txt</code> from <code>~/MeetingRecorder/</code>.</div>
+        <div class="form-group">
+          <div style="display:flex;gap:8px;margin-bottom:8px">
+            <button class="btn btn-ghost" onclick="loadTranscriptFromFile()" style="padding:7px 14px;font-size:12px">📂 Load transcript.txt</button>
+            <button class="btn btn-ghost" onclick="clearSumTranscript()"     style="padding:7px 14px;font-size:12px">✕ Clear</button>
+          </div>
+          <textarea class="form-input" id="sum-transcript" placeholder="Paste transcript here, or use Load transcript.txt above…" rows="8"></textarea>
+          <div class="form-hint" id="sum-transcript-hint"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Generate Notes</div>
+        <div class="btn-row" style="margin-bottom:16px">
+          <button class="btn btn-primary" id="sum-run-btn" onclick="runStandaloneSummary()">✨ Generate Meeting Notes</button>
+          <span id="sum-status" style="font-size:13px;color:var(--text2)"></span>
+        </div>
+        <div id="sum-progress-wrap" style="display:none">
+          <div class="overall-progress-bar" style="margin-bottom:12px">
+            <div class="overall-progress-fill" id="sum-progress-fill" style="width:0%;transition:width 0.4s ease"></div>
+          </div>
+        </div>
+        <div id="sum-output-wrap" style="display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <div style="font-size:13px;font-weight:600;color:var(--text2)">Generated Notes</div>
+            <span id="sum-provider-badge" class="badge badge-blue"></span>
+          </div>
+          <div class="notes-box" id="sum-notes-output"></div>
+          <div class="divider"></div>
+          <div class="btn-row">
+            <button class="btn btn-ghost" onclick="copySumNotes()">📋 Copy Notes</button>
+            <button class="btn btn-ghost" onclick="saveSumNotesAs()">💾 Save as meeting_notes.md</button>
+          </div>
+          <div id="sum-save-hint" style="font-size:11px;color:var(--text3);margin-top:8px"></div>
+        </div>
+      </div>
+    </div><!-- /page-summarize -->
+
+
+    <!-- ══════════════════════════════════════════════════════════════
+         SETTINGS PAGE
+         ══════════════════════════════════════════════════════════════ -->
     <div id="page-settings" class="page">
       <div class="section-title">Settings</div>
-      <div class="section-sub">Configure API keys, email, and recording options.</div>
-
+      <div class="section-sub">Configure API keys, email delivery, and recording options.</div>
       <div class="card">
         <div class="card-title">AI API Keys</div>
         <div class="form-group">
           <label class="form-label">Anthropic API Key (Claude)</label>
-          <input type="password" class="form-input" id="cfg-anthropicKey" placeholder="sk-ant-..."/>
+          <input type="password" class="form-input" id="cfg-anthropicKey" placeholder="sk-ant-…"/>
         </div>
         <div class="form-group">
           <label class="form-label">OpenAI API Key (ChatGPT)</label>
-          <input type="password" class="form-input" id="cfg-openaiKey" placeholder="sk-..."/>
+          <input type="password" class="form-input" id="cfg-openaiKey" placeholder="sk-…"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Google Gemini API Key</label>
+          <input type="password" class="form-input" id="cfg-geminiKey" placeholder="AIza…"/>
+          <div class="form-hint">Get a key at <a href="#" style="color:var(--accent2)" onclick="api.openExternal('https://aistudio.google.com/app/apikey')">aistudio.google.com</a>. Uses gemini-1.5-pro.</div>
         </div>
         <div class="form-group">
           <label class="form-label">Whisper Model</label>
@@ -565,53 +795,243 @@
             <option value="medium">medium — high accuracy, slower</option>
             <option value="large">large — best accuracy, slowest</option>
           </select>
-          <div class="form-hint">Larger models take more time but produce better transcripts. "base" or "small" works well for meetings.</div>
         </div>
       </div>
-
       <div class="card">
         <div class="card-title">Email (SMTP)</div>
         <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">SMTP Host</label>
-            <input type="text" class="form-input" id="cfg-smtpHost" placeholder="smtp.gmail.com"/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">SMTP Port</label>
-            <input type="number" class="form-input" id="cfg-smtpPort" placeholder="587"/>
-          </div>
+          <div class="form-group"><label class="form-label">SMTP Host</label><input type="text" class="form-input" id="cfg-smtpHost" placeholder="smtp.gmail.com"/></div>
+          <div class="form-group"><label class="form-label">SMTP Port</label><input type="number" class="form-input" id="cfg-smtpPort" placeholder="587"/></div>
         </div>
         <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">SMTP Username</label>
-            <input type="text" class="form-input" id="cfg-smtpUser" placeholder="you@gmail.com"/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">SMTP Password</label>
-            <input type="password" class="form-input" id="cfg-smtpPass" placeholder="App password or SMTP password"/>
-          </div>
+          <div class="form-group"><label class="form-label">SMTP Username</label><input type="text" class="form-input" id="cfg-smtpUser" placeholder="you@gmail.com"/></div>
+          <div class="form-group"><label class="form-label">SMTP Password</label><input type="password" class="form-input" id="cfg-smtpPass" placeholder="App password"/></div>
         </div>
         <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">From Address</label>
-            <input type="email" class="form-input" id="cfg-emailFrom" placeholder="you@gmail.com"/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Send Notes To</label>
-            <input type="email" class="form-input" id="cfg-emailTo" placeholder="team@company.com"/>
-          </div>
+          <div class="form-group"><label class="form-label">From Address</label><input type="email" class="form-input" id="cfg-emailFrom" placeholder="you@gmail.com"/></div>
+          <div class="form-group"><label class="form-label">Send Notes To</label><input type="email" class="form-input" id="cfg-emailTo" placeholder="team@company.com"/></div>
         </div>
-        <div class="form-hint" style="margin-top:4px">
-          For Gmail: use an <strong style="color:var(--text2)">App Password</strong> (not your regular password).
-          Generate one at myaccount.google.com → Security → 2-Step Verification → App passwords.
+        <div class="form-hint">Gmail: Google Account → Security → 2-Step Verification → App passwords.</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="saveSettings()">💾 Save Settings</button>
+        <button class="btn btn-ghost"   onclick="testEmail()">📨 Test Email</button>
+      </div>
+    </div><!-- /page-settings -->
+
+
+    <!-- ══════════════════════════════════════════════════════════════
+         BUILD PAGE  (Mac + Windows tabs)
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="page-build" class="page">
+      <div class="section-title">Build Installer</div>
+      <div class="section-sub">Package Meeting Recorder as a native desktop app for macOS or Windows.</div>
+
+      <div class="build-tabs">
+        <div class="build-tab active" id="build-tab-mac" onclick="switchBuildTab('mac')">🍎 macOS</div>
+        <div class="build-tab"        id="build-tab-win" onclick="switchBuildTab('win')">🪟 Windows 11</div>
+      </div>
+
+      <!-- macOS panel -->
+      <div class="build-panel active" id="build-panel-mac">
+        <div class="card">
+          <div class="card-title">How it works</div>
+          <p style="font-size:13px;color:var(--text2);line-height:1.7">
+            <strong style="color:var(--text)">electron-builder</strong> produces a <code style="color:var(--accent2)">.dmg</code> drag-and-drop installer and a <code style="color:var(--accent2)">.pkg</code> for Apple Silicon (arm64).
+          </p>
+          <p style="font-size:13px;color:var(--text3);margin-top:10px;line-height:1.6">Python and Whisper are not bundled — users need <code>python3</code> and <code>openai-whisper</code> installed. Run <code>./setup.sh</code> first.</p>
+        </div>
+        <div class="card">
+          <div class="card-title">Step-by-step</div>
+          <div class="build-step"><div class="build-num">1</div><div class="build-content">
+            <div class="build-title">Run setup script (first time only)</div>
+            <code class="build-cmd">chmod +x setup.sh && ./setup.sh</code>
+          </div></div>
+          <div class="build-step"><div class="build-num">2</div><div class="build-content">
+            <div class="build-title">Install electron-builder</div>
+            <code class="build-cmd">npm install --save-dev electron-builder</code>
+          </div></div>
+          <div class="build-step"><div class="build-num">3</div><div class="build-content">
+            <div class="build-title">Add app icon (optional)</div>
+            <div class="build-desc">Place a 1024×1024 PNG as <code>assets/icon.png</code>, then convert it:</div>
+            <code class="build-cmd">mkdir assets/icon.iconset
+sips -z 16 16   assets/icon.png --out assets/icon.iconset/icon_16x16.png
+sips -z 512 512 assets/icon.png --out assets/icon.iconset/icon_512x512.png
+cp assets/icon.png assets/icon.iconset/icon_512x512@2x.png
+iconutil -c icns assets/icon.iconset -o assets/icon.icns</code>
+          </div></div>
+          <div class="build-step"><div class="build-num">4</div><div class="build-content">
+            <div class="build-title">Build DMG + PKG installer</div>
+            <code class="build-cmd">npm run build</code>
+          </div></div>
+          <div class="build-step"><div class="build-num">5</div><div class="build-content">
+            <div class="build-title">First launch on another Mac (unsigned app)</div>
+            <div class="build-desc">Right-click → Open → Open, or remove the quarantine flag:</div>
+            <code class="build-cmd">xattr -cr /Applications/Meeting\ Recorder.app</code>
+          </div></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Output files</div>
+          <p style="font-size:13px;color:var(--text2);line-height:2">
+            <code style="color:var(--accent2)">dist/Meeting Recorder-1.0.0-arm64.dmg</code><br>
+            <code style="color:var(--accent2)">dist/Meeting Recorder-1.0.0-arm64.pkg</code><br>
+            <code style="color:var(--accent2)">dist/mac-arm64/Meeting Recorder.app</code>
+          </p>
+        </div>
+      </div><!-- /build-panel-mac -->
+
+      <!-- Windows panel -->
+      <div class="build-panel" id="build-panel-win">
+        <div class="card">
+          <div class="card-title">Overview</div>
+          <p style="font-size:13px;color:var(--text2);line-height:1.7">
+            electron-builder produces an <strong style="color:var(--text)">NSIS installer</strong> (.exe) and a <strong style="color:var(--text)">portable</strong> .exe for Windows x64. Cross-compilation from macOS is possible but requires <code>wine</code>; building on a Windows machine is simpler.
+          </p>
+          <p style="font-size:13px;color:var(--text3);margin-top:10px;line-height:1.6">
+            Python, Whisper, and ffmpeg are not bundled. Run <code>setup-windows.ps1</code> first to install all prerequisites.
+          </p>
+        </div>
+        <div class="card">
+          <div class="card-title">Prerequisites (PowerShell — run as Administrator)</div>
+          <div class="build-step"><div class="build-num">1</div><div class="build-content">
+            <div class="build-title">Allow script execution (once per machine)</div>
+            <code class="build-cmd">Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass</code>
+          </div></div>
+          <div class="build-step"><div class="build-num">2</div><div class="build-content">
+            <div class="build-title">Run the setup script</div>
+            <div class="build-desc">Installs Chocolatey, Node.js, Python 3, ffmpeg, VB-Audio Virtual Cable, openai-whisper, and npm dependencies.</div>
+            <code class="build-cmd">.\setup-windows.ps1</code>
+          </div></div>
+          <div class="build-step"><div class="build-num">3</div><div class="build-content">
+            <div class="build-title">Configure audio loopback</div>
+            <div class="build-desc">After the VB-Audio driver installs, set your meeting app (Teams/Zoom) to output to <strong>CABLE Input</strong>. Meeting Recorder will capture from <strong>CABLE Output</strong>.</div>
+          </div></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Building the installer</div>
+          <div class="build-step"><div class="build-num">4</div><div class="build-content">
+            <div class="build-title">Install electron-builder (if not done by setup script)</div>
+            <code class="build-cmd">npm install --save-dev electron-builder</code>
+          </div></div>
+          <div class="build-step"><div class="build-num">5</div><div class="build-content">
+            <div class="build-title">Add a Windows icon (optional)</div>
+            <div class="build-desc">Place a 256×256 <code>.ico</code> file at <code>assets/icon.ico</code>. Online converters can create .ico from a PNG.</div>
+          </div></div>
+          <div class="build-step"><div class="build-num">6</div><div class="build-content">
+            <div class="build-title">Build NSIS installer + portable</div>
+            <code class="build-cmd">npm run build:win</code>
+          </div></div>
+          <div class="build-step"><div class="build-num">7</div><div class="build-content">
+            <div class="build-title">Build portable .exe only</div>
+            <code class="build-cmd">npm run build:win:portable</code>
+          </div></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Output files</div>
+          <p style="font-size:13px;color:var(--text2);line-height:2">
+            <code style="color:var(--accent2)">dist/Meeting Recorder Setup 1.0.0.exe</code> — NSIS installer<br>
+            <code style="color:var(--accent2)">dist/Meeting Recorder 1.0.0.exe</code> — portable (no install)<br>
+          </p>
+          <p style="font-size:13px;color:var(--text3);margin-top:8px;line-height:1.6">
+            SmartScreen may warn on first launch of an unsigned binary. Click "More info → Run anyway", or sign the binary with a code-signing certificate.
+          </p>
+        </div>
+      </div><!-- /build-panel-win -->
+
+    </div><!-- /page-build -->
+
+
+    <!-- ══════════════════════════════════════════════════════════════
+         TEST SETUP PAGE
+         Quick smoke-test: pick a screen, speak, verify audio is captured
+         and transcribed correctly before doing a real meeting.
+         ══════════════════════════════════════════════════════════════ -->
+    <div id="page-test" class="page">
+      <div class="section-title">Test Setup</div>
+      <div class="section-sub">Verify your screen capture and audio pipeline before recording a real meeting.</div>
+
+      <!-- Step 1: Screen -->
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div class="card-title" style="margin:0">Step 1 — Screen</div>
+          <span id="test-screen-badge" class="badge" style="background:var(--bg3);color:var(--text3)">not selected</span>
+        </div>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.6">Select which screen or window to capture. Any screen works for the test.</p>
+        <button class="btn btn-ghost" onclick="testPickScreen()" id="test-pick-screen-btn" style="margin-bottom:12px">🖥 Pick a Screen</button>
+        <div id="test-screen-preview-wrap" style="display:none">
+          <video id="test-screen-preview" muted playsinline style="width:100%;max-height:160px;object-fit:contain;border-radius:6px;background:#000;border:1px solid var(--border)"></video>
         </div>
       </div>
 
-      <div class="btn-row">
-        <button class="btn btn-primary" onclick="saveSettings()">💾 Save Settings</button>
-        <button class="btn btn-ghost" onclick="testEmail()">📨 Test Email</button>
+      <!-- Step 2: Audio -->
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div class="card-title" style="margin:0">Step 2 — Audio Input</div>
+          <span id="test-audio-badge" class="badge" style="background:var(--bg3);color:var(--text3)">not selected</span>
+        </div>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.6">Choose your audio device and speak a few words. Watch the VU meter to confirm the level is registering.</p>
+        <div id="test-audio-device-list" style="margin-bottom:12px">
+          <div style="color:var(--text3);font-size:13px">Loading devices…</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-size:12px;color:var(--text2)">Live level:</span>
+          <div style="flex:1;height:12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;overflow:hidden">
+            <div id="test-vu-fill" style="height:100%;width:0%;border-radius:6px;background:linear-gradient(to right,#22c55e 0%,#f59e0b 60%,#ef4444 100%);transition:width 60ms linear"></div>
+          </div>
+        </div>
+        <div id="test-vu-hint" style="font-size:11px;color:var(--text3);margin-top:6px">Select a device above to see the live level.</div>
       </div>
-    </div>
+
+      <!-- Step 3: Record a test clip -->
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div class="card-title" style="margin:0">Step 3 — Test Recording</div>
+          <span id="test-rec-badge" class="badge" style="background:var(--bg3);color:var(--text3)">idle</span>
+        </div>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:16px;line-height:1.6">
+          Record a short clip (say a few sentences aloud), then transcribe it with Whisper to confirm end-to-end audio capture is working.
+        </p>
+        <div class="btn-row" style="margin-bottom:14px">
+          <button class="btn btn-primary" id="test-rec-btn" onclick="toggleTestRecording()" disabled>⏺ Start Test Recording</button>
+          <span id="test-rec-timer" style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text2)">00:00</span>
+        </div>
+        <div id="test-rec-status" style="font-size:13px;color:var(--text2)">Select a screen and audio device first.</div>
+      </div>
+
+      <!-- Step 4: Transcribe the test clip -->
+      <div class="card" id="test-transcribe-card" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div class="card-title" style="margin:0">Step 4 — Transcription Check</div>
+          <span id="test-tx-badge" class="badge" style="background:var(--bg3);color:var(--text3)">ready</span>
+        </div>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6">Transcribe the test clip to verify Whisper can understand your audio. Compare the output to what you said.</p>
+        <div class="btn-row" style="margin-bottom:14px">
+          <button class="btn btn-primary" id="test-tx-btn" onclick="runTestTranscribe()">🔤 Transcribe Test Clip</button>
+          <span id="test-tx-status" style="font-size:13px;color:var(--text2)"></span>
+        </div>
+        <div id="test-tx-progress" style="display:none;margin-bottom:10px">
+          <div class="overall-progress-bar">
+            <div class="overall-progress-fill" id="test-tx-fill" style="width:0%;transition:width .4s ease"></div>
+          </div>
+        </div>
+        <div id="test-tx-output" style="display:none">
+          <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">Transcript:</div>
+          <div class="output-box" id="test-tx-text" style="min-height:60px"></div>
+          <div id="test-tx-result" style="font-size:13px;margin-top:10px;padding:10px 14px;border-radius:var(--radius-sm)"></div>
+        </div>
+      </div>
+
+      <!-- Checklist summary -->
+      <div class="card" id="test-summary-card" style="display:none">
+        <div class="card-title">Setup Checklist</div>
+        <div id="test-checklist" style="display:flex;flex-direction:column;gap:8px;font-size:13px"></div>
+        <div class="divider"></div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="switchTab('record')">Go to Record →</button>
+          <button class="btn btn-ghost"   onclick="resetTestSetup()">🔄 Reset Test</button>
+        </div>
+      </div>
+    </div><!-- /page-test -->
 
   </div><!-- /content -->
 </div><!-- /app-body -->
@@ -619,319 +1039,1456 @@
 <div id="toast"></div>
 
 <script>
-// ─── State ────────────────────────────────────────────────────────────────────
-let config        = {};
-let selectedSource = null;
-let aiProvider    = 'claude';
-let isRecording   = false;
-let mediaRecorder = null;
-let timerInterval = null;
-let elapsed       = 0;
-let sessionDir    = null;
-let audioPath     = null;
-let lastResults   = null;
+/**
+ * renderer.js (inline) — Meeting Recorder
+ *
+ * Sections:
+ *   1.  State
+ *   2.  Theme management
+ *   3.  Init
+ *   4.  Tab / build-tab switching
+ *   5.  Window picker
+ *   6.  Audio device picker
+ *   7.  VU meter
+ *   8.  Toggle helpers
+ *   9.  Recording lifecycle
+ *   10. Pipeline execution
+ *   11. Pipeline step log panels (expand/collapse + real-time IPC streaming)
+ *   12. Pipeline visual helpers
+ *   13. Error handling
+ *   14. Results population
+ *   15. Standalone Summarize page
+ *   16. Settings form
+ *   17. Utility helpers
+ */
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// 1. STATE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let config              = {};
+let selectedSource      = null;
+let selectedAudioDevice = null;
+let aiProvider          = 'claude';
+let sumProvider         = 'claude';
+
+// Output option flags (saved to config)
+let enableSummary    = false;   // AI summary — OFF by default
+let enableTranscript = true;    // Save transcript.txt — ON by default
+let enableSubtitles  = false;   // Generate subtitles.srt — OFF by default
+let enableEmail      = false;   // Email — OFF by default
+
+let viewMode        = 'grid';
+let windowSources   = [];
+let audioDevices    = [];
+
+// Recording
+let isRecording        = false;
+let mediaRecorder      = null;   // video MediaRecorder (screen capture)
+let audioMediaRecorder = null;   // audio-only MediaRecorder (microphone/device)
+let audioMicStream     = null;   // getUserMedia audio stream
+let liveStream         = null;
+let timerInterval      = null;
+let elapsed            = 0;
+
+// Session
+let sessionDir = null;
+let logPath    = null;
+let audioPath  = null;
+
+// Pipeline
+let pipelineState   = 'idle';
+let lastFailedStep  = null;
+let pipelineData    = {};
+const STEP_WEIGHTS  = { transcribe: 40, summarize: 30, save: 10, email: 20 };
+let completedPct    = 0;
+let lastResults     = null;
+
+// Step log panels — which steps have their log panel open
+const stepLogOpen = { transcribe: false, summarize: false, save: false, email: false };
+
+// VU meter
+let vuAudioCtx  = null;
+let vuAnalyser  = null;
+let vuSource    = null;
+let vuMicStream = null;
+let vuRafId     = null;
+let vuDataArray = null;
+
+// Test setup
+let testSelectedScreen  = null;
+let testSelectedDevice  = null;
+let testIsRecording     = false;
+let testMediaRecorder   = null;
+let testStream          = null;
+let testAudioProcess    = null;
+let testSessionDir      = null;
+let testAudioPath          = null;
+let testAudioMediaRecorder = null;
+let testAudioMicStream     = null;
+let testElapsed            = 0;
+let testTimerInterval      = null;
+let testVuAudioCtx      = null;
+let testVuAnalyser      = null;
+let testVuSource        = null;
+let testVuMicStream     = null;
+let testVuRafId         = null;
+let testVuDataArray     = null;
+let testChecks          = { screen: false, audio: false, recording: false, transcribe: false };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 2. THEME MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Applies a theme to the document and saves the preference.
+ * 'system' reads prefers-color-scheme at call time.
+ * @param {'dark'|'light'|'system'} theme
+ * @param {boolean} [save=true]
+ */
+function setTheme(theme, save = true) {
+  let effective = theme;
+  if (theme === 'system') {
+    effective = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  document.documentElement.setAttribute('data-theme', effective);
+
+  // Update pill button states
+  ['dark','light','system'].forEach(t => {
+    document.getElementById(`theme-${t}`)?.classList.toggle('active', t === theme);
+  });
+
+  if (save) {
+    config.theme = theme;
+    api.saveConfig(config).catch(() => {});
+  }
+}
+
+// Listen for OS-level theme changes when in 'system' mode
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (config.theme === 'system') setTheme('system', false);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 3. INIT
+// ═══════════════════════════════════════════════════════════════════════════════
+
 (async () => {
   config = await api.loadConfig();
   applyConfigToForm(config);
+
+  // Theme
+  setTheme(config.theme || 'dark', false);
+
+  // Provider
+  if (config.aiProvider) { selectProvider(config.aiProvider); selectSumProvider(config.aiProvider); }
+
+  // Output option toggles — restore from saved config, overriding JS defaults
+  // summary: default OFF; if config explicitly saved true, turn it on
+  if (config.enableSummary === true) {
+    document.getElementById('enable-summary').checked = true;
+    togglePanel('provider-panel', true);
+    enableSummary = true;
+  } else {
+    // Default OFF — make sure provider panel is collapsed
+    togglePanel('provider-panel', false);
+  }
+  // transcript: default ON; if config explicitly saved false, turn it off
+  if (config.enableTranscript === false) {
+    document.getElementById('enable-transcript').checked = false;
+    enableTranscript = false;
+  }
+  if (config.enableSubtitles === true) {
+    document.getElementById('enable-subtitles').checked = true;
+    enableSubtitles = true;
+  }
+  // email: default OFF; if config explicitly saved true, turn it on
+  if (config.enableEmail === true) {
+    document.getElementById('enable-email').checked = true;
+    enableEmail = true;
+  }
+
+  // Register real-time step log listener (IPC push from main process)
+  api.onStepLog(({ step, line }) => appendStepLog(step, line));
+
+  // Auto-populate window list and audio devices on launch — no Refresh needed
+  refreshWindows();
+  refreshAudioDevices();
 })();
 
-// ─── Tab switching ────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// 4. TAB / BUILD-TAB SWITCHING
+// ═══════════════════════════════════════════════════════════════════════════════
+
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.page === name));
-  document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === `page-${name}`));
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + name));
+  if (name === 'test') initTestPage();
 }
 
-// ─── Window picker ────────────────────────────────────────────────────────────
+function switchBuildTab(platform) {
+  ['mac','win'].forEach(p => {
+    document.getElementById('build-tab-' + p).classList.toggle('active', p === platform);
+    document.getElementById('build-panel-' + p).classList.toggle('active', p === platform);
+  });
+}
+
+/**
+ * Toggles a collapsible card body section and updates its chevron button.
+ * @param {string} bodyId   — id of the div to show/hide
+ * @param {string} btnId    — id of the .card-collapse-btn
+ */
+function toggleCardSection(bodyId, btnId) {
+  const body = document.getElementById(bodyId);
+  const btn  = document.getElementById(btnId);
+  if (!body) return;
+  const isCollapsed = body.style.display === 'none';
+  body.style.display = isCollapsed ? '' : 'none';
+  btn?.classList.toggle('collapsed', !isCollapsed);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 5. WINDOW PICKER
+// ═══════════════════════════════════════════════════════════════════════════════
+
 async function refreshWindows() {
   const grid = document.getElementById('window-grid');
-  grid.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:20px">Loading windows…</div>';
+  const list = document.getElementById('window-list');
+  const loading = '<div style="color:var(--text3);font-size:13px;padding:20px">Loading…</div>';
+  grid.innerHTML = loading; list.innerHTML = loading;
   try {
-    const windows = await api.getWindows();
-    if (!windows.length) {
-      grid.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:20px">No windows found. Make sure Teams is open.</div>';
-      return;
-    }
-    grid.innerHTML = '';
-    windows.forEach(w => {
-      const div = document.createElement('div');
-      div.className = 'window-item';
-      div.dataset.id = w.id;
-      div.innerHTML = `
-        <img class="window-thumb" src="${w.thumbnail}" alt="${w.name}"/>
-        <div class="window-name" title="${w.name}">${w.name}</div>
-      `;
-      div.onclick = () => selectWindow(w, div);
-      grid.appendChild(div);
+    const raw = await api.getWindows();
+    // Sort: screens first, then windows A-Z
+    windowSources = raw.sort((a, b) => {
+      const aS = a.id.startsWith('screen:'), bS = b.id.startsWith('screen:');
+      if (aS !== bS) return aS ? -1 : 1;
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
     });
-  } catch(e) {
-    grid.innerHTML = `<div style="color:var(--red);font-size:13px;padding:20px">Error: ${e.message}</div>`;
+    renderWindows(windowSources);
+  } catch (e) {
+    const err = `<div style="color:var(--red);font-size:13px;padding:20px">Error: ${e.message}</div>`;
+    grid.innerHTML = err; list.innerHTML = err;
   }
 }
 
-function selectWindow(source, el) {
-  document.querySelectorAll('.window-item').forEach(i => i.classList.remove('selected'));
-  el.classList.add('selected');
-  selectedSource = source;
-  document.getElementById('selected-window-label').textContent = `Selected: ${source.name}`;
-  document.getElementById('record-btn').disabled = false;
-  document.getElementById('record-status').textContent = 'Ready to record';
+function renderWindows(sources) { renderGrid(sources); renderList(sources); }
+
+function renderGrid(sources) {
+  const grid = document.getElementById('window-grid');
+  if (!sources.length) { grid.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:20px;grid-column:1/-1">No windows found.</div>'; return; }
+  grid.innerHTML = '';
+  sources.forEach(w => {
+    const div = document.createElement('div');
+    div.className = 'window-item' + (selectedSource?.id === w.id ? ' selected' : '');
+    div.dataset.id = w.id;
+    div.innerHTML = `<img class="window-thumb" src="${w.thumbnail}" alt="${w.name}"/><div class="window-name" title="${w.name}">${w.name}</div>`;
+    div.onclick = () => selectWindow(w);
+    grid.appendChild(div);
+  });
 }
 
-// ─── Provider toggle ──────────────────────────────────────────────────────────
+function renderList(sources) {
+  const list = document.getElementById('window-list');
+  if (!sources.length) { list.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:16px">No windows found.</div>'; return; }
+  list.innerHTML = '';
+  sources.forEach((w, i) => {
+    const div = document.createElement('div');
+    div.className = 'window-list-item' + (selectedSource?.id === w.id ? ' selected' : '');
+    div.dataset.id = w.id;
+    const isScreen = w.id.startsWith('screen:');
+    div.innerHTML = `
+      <div class="window-list-num">${isScreen ? '📺' : i + 1}</div>
+      <img class="window-list-thumb" src="${w.thumbnail}" alt="${w.name}"/>
+      <div class="window-list-info">
+        <div class="window-list-name" title="${w.name}">${w.name}</div>
+        <div class="window-list-type">${isScreen ? 'Screen' : 'Window'}</div>
+      </div>`;
+    div.onclick = () => selectWindow(w);
+    list.appendChild(div);
+  });
+}
+
+function selectWindow(source) {
+  selectedSource = source;
+  document.querySelectorAll('.window-item').forEach(el => el.classList.toggle('selected', el.dataset.id === source.id));
+  document.querySelectorAll('.window-list-item').forEach(el => el.classList.toggle('selected', el.dataset.id === source.id));
+  document.getElementById('selected-window-label').textContent = `Selected: ${source.name}`;
+  updateRecordButtonState();
+}
+
+function setViewMode(mode) {
+  viewMode = mode;
+  document.getElementById('view-grid-btn').classList.toggle('active', mode === 'grid');
+  document.getElementById('view-list-btn').classList.toggle('active', mode === 'list');
+  document.getElementById('window-grid').classList.toggle('hidden', mode !== 'grid');
+  document.getElementById('window-list').classList.toggle('hidden', mode !== 'list');
+  if (windowSources.length > 0) renderWindows(windowSources);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 6. AUDIO DEVICE PICKER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function refreshAudioDevices() {
+  const container = document.getElementById('audio-device-list');
+  container.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:12px">Querying ffmpeg…</div>';
+  try {
+    audioDevices = await api.listAudioDevices();
+    if (!audioDevices.length) { container.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:12px">No audio devices found. Is ffmpeg installed?</div>'; return; }
+    renderAudioDevices(audioDevices);
+    const preferred = audioDevices.find(d => d.name.toLowerCase().includes('blackhole') || d.name.toLowerCase().includes('cable')) || audioDevices[0];
+    if (preferred && !selectedAudioDevice) selectAudioDevice(preferred);
+  } catch (e) {
+    container.innerHTML = `<div style="color:var(--red);font-size:13px;padding:12px">Error: ${e.message}</div>`;
+  }
+}
+
+function renderAudioDevices(devices) {
+  const container = document.getElementById('audio-device-list');
+  container.innerHTML = '';
+
+  // ── Group into physical devices and app-capture sources ──────────────────
+  const physDevices = devices.filter(d => d.type !== 'app');
+  const appDevices  = devices.filter(d => d.type === 'app');
+
+  function renderItem(d) {
+    const div = document.createElement('div');
+    const isSelected = selectedAudioDevice?.index === d.index;
+    div.className = 'audio-device-item' + (isSelected ? ' selected' : '');
+    div.dataset.index = d.index;
+
+    if (d.type === 'app') {
+      // Application Audio Capture entry
+      const runningBadge = d.running
+        ? '<span style="font-size:10px;background:rgba(34,197,94,.2);color:var(--green);border-radius:4px;padding:1px 6px;margin-left:6px">running</span>'
+        : '<span style="font-size:10px;background:var(--bg3);color:var(--text3);border-radius:4px;padding:1px 6px;margin-left:6px">not detected</span>';
+      const check = isSelected ? '<span class="audio-device-check">✓</span>' : '';
+      div.innerHTML = `
+        <span class="audio-device-icon">📱</span>
+        <div class="audio-device-info">
+          <div class="audio-device-name">${d.name.replace(' (App Audio)','')}${runningBadge}</div>
+          <div class="audio-device-sub" style="font-family:monospace;font-size:10px;opacity:.7">${d.appBundleId}</div>
+        </div>${check}`;
+    } else {
+      // Regular AVFoundation device (AirPods, BlackHole, Built-in Mic, etc.)
+      const isLoopback = d.name.toLowerCase().includes('blackhole') || d.name.toLowerCase().includes('cable');
+      const isMic      = d.name.toLowerCase().includes('mic');
+      const isBuiltIn  = d.name.toLowerCase().includes('built-in') || d.name.toLowerCase().includes('macbook');
+      const isAirPods  = d.name.toLowerCase().includes('airpod') || d.name.toLowerCase().includes('beats');
+      let subLabel = 'Audio input device';
+      if (isLoopback)      subLabel = 'Virtual loopback — captures all system/meeting audio';
+      else if (isAirPods)  subLabel = 'AirPods / wireless headset microphone';
+      else if (isMic)      subLabel = 'Microphone input';
+      else if (isBuiltIn)  subLabel = 'Built-in audio — may pick up room noise';
+      const icon  = isLoopback ? '🔁' : isAirPods ? '🎧' : isMic ? '🎤' : '🔊';
+      const check = isSelected ? '<span class="audio-device-check">✓</span>' : '';
+      div.innerHTML = `
+        <span class="audio-device-icon">${icon}</span>
+        <div class="audio-device-info">
+          <div class="audio-device-name">[${d.index}] ${d.name}</div>
+          <div class="audio-device-sub">${subLabel}</div>
+        </div>${check}`;
+    }
+    div.onclick = () => selectAudioDevice(d);
+    container.appendChild(div);
+  }
+
+  if (physDevices.length) {
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;padding:6px 2px 4px;';
+    hdr.textContent = 'Audio Devices';
+    container.appendChild(hdr);
+    physDevices.forEach(renderItem);
+  }
+
+  if (appDevices.length) {
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;padding:10px 2px 4px;';
+    hdr.textContent = 'Application Audio Capture (macOS 14+)';
+    container.appendChild(hdr);
+    appDevices.forEach(renderItem);
+  }
+
+  if (!devices.length) {
+    container.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:12px">No audio devices found. Is ffmpeg installed?</div>';
+  }
+}
+
+function selectAudioDevice(device) {
+  selectedAudioDevice = device;
+  const label = device.type === 'app' ? device.name : '[' + device.index + '] ' + device.name;
+  document.getElementById('selected-audio-label').textContent = label;
+  renderAudioDevices(audioDevices);
+  updateRecordButtonState();
+  // Auto-collapse audio card after selection
+  const body = document.getElementById('audio-card-body');
+  const btn  = document.getElementById('audio-card-collapse-btn');
+  if (body && body.style.display !== 'none') { body.style.display = 'none'; btn?.classList.add('collapsed'); }
+  // VU preview only makes sense for physical devices
+  if (device.type !== 'app') {
+    startVuPreview(device.name);
+  } else {
+    stopVuMeter();
+  }
+}
+
+function updateRecordButtonState() {
+  const btn = document.getElementById('record-btn');
+  if (selectedSource && selectedAudioDevice) {
+    btn.disabled = false;
+    document.getElementById('record-status').textContent = 'Ready to record';
+  } else {
+    btn.disabled = true;
+    document.getElementById('record-status').textContent = !selectedSource ? 'Select a window to start' : 'Select an audio device to start';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 7. VU METER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function startVuPreview(deviceName) {
+  stopVuMeter();
+  try {
+    const allDevices  = await navigator.mediaDevices.enumerateDevices();
+    const audioInputs = allDevices.filter(d => d.kind === 'audioinput');
+    const matched     = audioInputs.find(d => d.label.toLowerCase() === deviceName.toLowerCase())
+                     || audioInputs.find(d => d.label.toLowerCase().includes(deviceName.toLowerCase().split(' ')[0]));
+    vuMicStream = await navigator.mediaDevices.getUserMedia({
+      audio: matched ? { deviceId: { exact: matched.deviceId } } : true, video: false
+    });
+    vuAudioCtx  = new AudioContext();
+    vuAnalyser  = vuAudioCtx.createAnalyser();
+    vuAnalyser.fftSize = 256;
+    vuDataArray = new Uint8Array(vuAnalyser.fftSize);
+    vuSource    = vuAudioCtx.createMediaStreamSource(vuMicStream);
+    vuSource.connect(vuAnalyser);
+    vuRafId = requestAnimationFrame(vuTick);
+  } catch (e) { console.warn('[VU]', e.message); }
+}
+
+function vuTick() {
+  if (!vuAnalyser) return;
+  vuAnalyser.getByteTimeDomainData(vuDataArray);
+  let sumSq = 0;
+  for (let i = 0; i < vuDataArray.length; i++) { const s = (vuDataArray[i] - 128) / 128; sumSq += s * s; }
+  const pct = Math.min(100, Math.sqrt(sumSq / vuDataArray.length) * 400);
+  const pf = document.getElementById('preview-vu-fill');
+  const sf = document.getElementById('vu-standalone-fill');
+  if (pf) pf.style.width = pct + '%';
+  if (sf) sf.style.width = pct + '%';
+  vuRafId = requestAnimationFrame(vuTick);
+}
+
+function stopVuMeter() {
+  if (vuRafId)    { cancelAnimationFrame(vuRafId); vuRafId = null; }
+  if (vuSource)   { try { vuSource.disconnect(); } catch {} vuSource = null; }
+  if (vuAnalyser) { try { vuAnalyser.disconnect(); } catch {} vuAnalyser = null; }
+  if (vuAudioCtx) { vuAudioCtx.close().catch(() => {}); vuAudioCtx = null; }
+  if (vuMicStream){ vuMicStream.getTracks().forEach(t => t.stop()); vuMicStream = null; }
+  const pf = document.getElementById('preview-vu-fill');
+  const sf = document.getElementById('vu-standalone-fill');
+  if (pf) pf.style.width = '0%';
+  if (sf) sf.style.width = '0%';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 8. TOGGLE HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function togglePanel(panelId, visible) {
+  document.getElementById(panelId)?.classList.toggle('collapsed', !visible);
+}
+
 function selectProvider(p) {
   aiProvider = p;
-  document.getElementById('opt-claude').classList.toggle('selected', p === 'claude');
-  document.getElementById('opt-chatgpt').classList.toggle('selected', p === 'chatgpt');
+  ['claude','chatgpt','gemini'].forEach(id => document.getElementById(`opt-${id}`).classList.remove('selected','selected-gemini'));
+  document.getElementById(`opt-${p}`).classList.add(p === 'gemini' ? 'selected-gemini' : 'selected');
 }
 
-// ─── Recording ────────────────────────────────────────────────────────────────
+function selectSumProvider(p) {
+  sumProvider = p;
+  ['claude','chatgpt','gemini'].forEach(id => document.getElementById(`sum-opt-${id}`).classList.remove('selected','selected-gemini'));
+  document.getElementById(`sum-opt-${p}`).classList.add(p === 'gemini' ? 'selected-gemini' : 'selected');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 9. RECORDING LIFECYCLE
+// ═══════════════════════════════════════════════════════════════════════════════
+
 async function toggleRecording() {
-  if (!isRecording) {
-    await startRecording();
-  } else {
-    await stopRecording();
-  }
+  if (!isRecording) await startRecording();
+  else await stopRecording();
 }
 
 async function startRecording() {
-  if (!selectedSource) return toast('Select a window first', 'error');
-
+  if (!selectedSource)      return toast('Select a window first', 'error');
+  if (!selectedAudioDevice) return toast('Select an audio device first', 'error');
   try {
-    // Get screen capture stream for the selected window
-    const stream = await navigator.mediaDevices.getUserMedia({
+    // ── Video: screen / window capture ───────────────────────────────────────
+    liveStream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: {
-        mandatory: {
-          chromeMediaSource: 'desktop',
-          chromeMediaSourceId: selectedSource.id,
-          minWidth: 1280, maxWidth: 3840,
-          minHeight: 720, maxHeight: 2160
-        }
-      }
+      video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: selectedSource.id,
+               minWidth: 1280, maxWidth: 3840, minHeight: 720, maxHeight: 2160 } }
     });
 
-    // Start session
-    const session = await api.recordingStart();
-    sessionDir = session.sessionDir;
-
-    // Start audio recording via ffmpeg/BlackHole in main process
+    // ── Session ───────────────────────────────────────────────────────────────
+    const session  = await api.recordingStart();
+    sessionDir     = session.sessionDir;
+    logPath        = session.logPath;
     const audioResult = await api.startAudio({ sessionDir });
-    audioPath = audioResult.audioPath;
+    audioPath      = audioResult.audioPath;
 
-    // Setup MediaRecorder for video
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
-    mediaRecorder.ondataavailable = async (e) => {
-      if (e.data.size > 0) {
-        const buf = await e.data.arrayBuffer();
-        await api.saveVideoChunk(buf);
-      }
+    // ── Audio: capture microphone / selected input device ─────────────────────
+    // App Audio Capture sources (type='app') are not accessible via getUserMedia.
+    // For those we fall back to the default system input — user should ensure the
+    // meeting app audio reaches their mic (e.g. via loopback or internal speakers).
+    let audioConstraints = { audio: true, video: false };
+    if (selectedAudioDevice.type !== 'app') {
+      try {
+        const allDevices = await navigator.mediaDevices.enumerateDevices();
+        const inputs     = allDevices.filter(d => d.kind === 'audioinput');
+        const devName    = selectedAudioDevice.name.toLowerCase();
+        const matched    = inputs.find(d => d.label.toLowerCase() === devName)
+                        || inputs.find(d => d.label.toLowerCase().includes(devName.split(' ')[0]));
+        if (matched) audioConstraints = { audio: { deviceId: { exact: matched.deviceId } }, video: false };
+      } catch {}
+    }
+
+    audioMicStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+    const audioMime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg']
+                        .find(m => MediaRecorder.isTypeSupported(m)) || 'audio/webm';
+    audioMediaRecorder = new MediaRecorder(audioMicStream, { mimeType: audioMime });
+    audioMediaRecorder.ondataavailable = async (e) => {
+      if (e.data.size > 0) await api.saveAudioChunk(await e.data.arrayBuffer());
     };
-    mediaRecorder.start(2000); // chunk every 2s
+    audioMediaRecorder.start(2000);
 
-    // UI update
-    isRecording = true;
-    elapsed = 0;
+    // ── Video MediaRecorder ───────────────────────────────────────────────────
+    mediaRecorder = new MediaRecorder(liveStream, { mimeType: 'video/webm;codecs=vp9' });
+    mediaRecorder.ondataavailable = async (e) => {
+      if (e.data.size > 0) await api.saveVideoChunk(await e.data.arrayBuffer());
+    };
+    mediaRecorder.start(2000);
+
+    // ── UI ────────────────────────────────────────────────────────────────────
+    const video = document.getElementById('preview-video');
+    video.srcObject = liveStream; video.play();
+    document.getElementById('preview-wrap').classList.add('visible');
+    document.getElementById('vu-standalone').classList.add('visible');
+    startVuPreview(selectedAudioDevice.name);
+
+    isRecording = true; elapsed = 0;
     const btn = document.getElementById('record-btn');
-    btn.classList.add('recording');
-    btn.textContent = '⏹';
-    document.getElementById('record-status').className = 'record-status live';
+    btn.classList.add('recording'); btn.textContent = '⏹';
+    document.getElementById('record-status').className   = 'record-status live';
     document.getElementById('record-status').textContent = '● Recording…';
     document.getElementById('pipeline-card').style.display = 'none';
 
     timerInterval = setInterval(() => {
       elapsed++;
-      document.getElementById('record-timer').textContent = formatTime(elapsed);
+      const t = formatTime(elapsed);
+      document.getElementById('record-timer').textContent  = t;
+      document.getElementById('preview-timer').textContent = t;
     }, 1000);
-
-  } catch(e) {
-    toast('Failed to start recording: ' + e.message, 'error');
-    console.error(e);
-  }
+  } catch (e) { toast('Failed to start: ' + e.message, 'error'); console.error(e); }
 }
 
 async function stopRecording() {
   if (!isRecording) return;
   isRecording = false;
-
-  // Stop timer
   clearInterval(timerInterval);
 
-  // Stop MediaRecorder
+  // Stop video recorder
   mediaRecorder.stop();
   mediaRecorder.stream.getTracks().forEach(t => t.stop());
 
-  // Stop audio
-  await api.stopAudio();
+  // Stop audio recorder — wait for the final ondataavailable before converting
+  if (audioMediaRecorder && audioMediaRecorder.state !== 'inactive') {
+    await new Promise(resolve => {
+      audioMediaRecorder.onstop = resolve;
+      audioMediaRecorder.stop();
+    });
+  }
+  if (audioMicStream) { audioMicStream.getTracks().forEach(t => t.stop()); audioMicStream = null; }
+  audioMediaRecorder = null;
 
-  // Stop video save
-  const { videoPath } = await api.recordingStop({ sessionDir });
+  // Convert buffered audio chunks (WebM) to WAV in main process
+  await api.stopAudio({ sessionDir });
+  await api.recordingStop({ sessionDir });
 
-  // UI update
+  document.getElementById('preview-video').srcObject = null;
+  liveStream = null;
+  document.getElementById('preview-wrap').classList.remove('visible');
+  document.getElementById('vu-standalone').classList.remove('visible');
+  stopVuMeter();
+
   const btn = document.getElementById('record-btn');
-  btn.classList.remove('recording');
-  btn.textContent = '⏺';
-  btn.disabled = true;
-  document.getElementById('record-status').className = 'record-status';
+  btn.classList.remove('recording'); btn.textContent = '⏺'; btn.disabled = true;
+  document.getElementById('record-status').className   = 'record-status';
   document.getElementById('record-status').textContent = 'Processing…';
 
-  // Show pipeline
   document.getElementById('pipeline-card').style.display = 'block';
-  resetSteps();
-
-  // Run pipeline
+  document.getElementById('pipeline-success-actions').style.display = 'none';
+  resetPipeline();
   await runPipeline();
-
   btn.disabled = false;
+  updateRecordButtonState();
 }
 
-// ─── Post-recording pipeline ──────────────────────────────────────────────────
-async function runPipeline() {
-  let transcript = '';
-  let srt = '';
-  let notes = '';
+// ═══════════════════════════════════════════════════════════════════════════════
+// 10. PIPELINE EXECUTION
+// ═══════════════════════════════════════════════════════════════════════════════
 
-  // Step 1: Transcribe
-  setStep('transcribe', 'active');
-  try {
-    const result = await api.transcribe({ audioPath, model: config.whisperModel || 'base' });
-    transcript = result.text;
-    srt = result.srt;
-    setStep('transcribe', 'done');
-  } catch(e) {
-    setStep('transcribe', 'error');
-    toast('Transcription failed: ' + e.message, 'error');
-    return;
+function resetPipeline() {
+  completedPct   = 0;
+  pipelineState  = 'idle';
+  lastFailedStep = null;
+  pipelineData   = {};
+  setOverallProgress(0, 'Starting…', false);
+  hideErrorPanel();
+  ['transcribe','summarize','save','email'].forEach(n => setStep(n, 'idle'));
+  clearAllStepLogs();
+}
+
+async function runPipeline(fromStep = 'transcribe') {
+  pipelineState = 'running';
+
+  // Step 1 — Transcribe
+  if (fromStep === 'transcribe') {
+    setStep('transcribe', 'active');
+    setOverallProgress(5, 'Transcribing audio with Whisper…', false);
+    try {
+      const result = await api.transcribe({ audioPath, model: config.whisperModel || 'base' });
+      pipelineData.transcript = result.text;
+      pipelineData.srt        = result.srt;
+      completedPct += STEP_WEIGHTS.transcribe;
+      setStep('transcribe', 'done');
+      setOverallProgress(completedPct, enableSummary ? 'Transcription done — generating notes…' : 'Transcription done — saving files…', false);
+    } catch (e) {
+      setStep('transcribe', 'error');
+      await showErrorPanel('transcribe', `Transcription failed:\n${e.message}`);
+      return;
+    }
   }
 
-  // Step 2: Summarize
-  setStep('summarize', 'active');
-  document.getElementById('step-summarize-detail').textContent =
-    `Using ${aiProvider === 'claude' ? 'Claude Opus' : 'GPT-4o'}…`;
-  try {
-    notes = await api.summarize({ transcript, provider: aiProvider, config });
-    setStep('summarize', 'done');
-  } catch(e) {
-    setStep('summarize', 'error');
-    toast('Summarization failed: ' + e.message, 'error');
-    return;
+  // Step 2 — Summarize (optional)
+  if (!enableSummary) {
+    setStep('summarize', 'skipped');
+    pipelineData.notes = '';
+  } else if (['transcribe','summarize'].includes(fromStep)) {
+    setStep('summarize', 'active');
+    const label = { claude: 'Claude Opus', chatgpt: 'GPT-4o', gemini: 'Gemini 1.5 Pro' }[aiProvider] || aiProvider;
+    document.getElementById('step-summarize-detail').textContent = `Using ${label}…`;
+    setOverallProgress(completedPct + 5, `Generating notes with ${label}…`, false);
+    try {
+      pipelineData.notes = await api.summarize({ transcript: pipelineData.transcript, provider: aiProvider, config });
+      completedPct += STEP_WEIGHTS.summarize;
+      setStep('summarize', 'done');
+      setOverallProgress(completedPct, 'Notes generated — saving files…', false);
+    } catch (e) {
+      setStep('summarize', 'error');
+      await showErrorPanel('summarize', `Summarization failed:\n${e.message}`);
+      return;
+    }
   }
 
-  // Step 3: Save files
-  setStep('save', 'active');
-  let transcriptPath, notesPath;
-  try {
-    const saved = await api.saveOutputs({ sessionDir, transcript, notes, srt });
-    transcriptPath = saved.transcriptPath;
-    notesPath = saved.notesPath;
-    setStep('save', 'done');
-  } catch(e) {
-    setStep('save', 'error');
-    toast('File save failed: ' + e.message, 'error');
-    return;
+  // Step 3 — Save
+  // Respect transcript and subtitle toggles
+  if (['transcribe','summarize','save'].includes(fromStep)) {
+    setStep('save', 'active');
+    // Build the file list description based on what's enabled
+    const saveDesc = ['meeting_notes.md', enableTranscript ? 'transcript.txt' : null, enableSubtitles ? 'subtitles.srt' : null].filter(Boolean).join(' · ');
+    document.getElementById('step-save-detail').textContent = saveDesc;
+    try {
+      const saved = await api.saveOutputs({
+        sessionDir,
+        transcript: enableTranscript ? pipelineData.transcript : null,
+        notes:      pipelineData.notes,
+        srt:        enableSubtitles  ? pipelineData.srt        : null
+      });
+      pipelineData.transcriptPath = saved.transcriptPath;
+      pipelineData.notesPath      = saved.notesPath;
+      completedPct += STEP_WEIGHTS.save;
+      setStep('save', 'done');
+      setOverallProgress(completedPct, enableEmail ? 'Files saved — sending email…' : 'Files saved.', false);
+    } catch (e) {
+      setStep('save', 'error');
+      await showErrorPanel('save', `File save failed:\n${e.message}`);
+      return;
+    }
   }
 
-  // Step 4: Email
-  setStep('email', 'active');
-  document.getElementById('step-email-detail').textContent = `Sending to ${config.emailTo}…`;
-  try {
-    await api.sendEmail({ config, notes, transcriptPath, notesPath, sessionDir });
-    setStep('email', 'done');
-    document.getElementById('step-email-detail').textContent = `Sent to ${config.emailTo}`;
-    toast('Meeting notes sent to ' + config.emailTo, 'success');
-  } catch(e) {
-    setStep('email', 'error');
-    document.getElementById('step-email-detail').textContent = 'Email failed (check Settings)';
-    toast('Email failed: ' + e.message, 'error');
+  // Step 4 — Email (optional)
+  // If email is disabled, or not configured, skip gracefully with a warning
+  const emailConfigured = !!(config.smtpHost && config.smtpUser && config.smtpPass && config.emailTo);
+  if (!enableEmail) {
+    setStep('email', 'skipped');
+    completedPct += STEP_WEIGHTS.email;
+  } else if (!emailConfigured) {
+    // Enabled but not configured — warn but do not fail the pipeline
+    setStep('email', 'skipped');
+    completedPct += STEP_WEIGHTS.email;
+    document.getElementById('step-email-detail').textContent = 'Skipped — SMTP not configured (see Settings)';
+    appendStepLog('email', 'WARNING: Email is enabled but SMTP credentials are not configured. Configure smtpHost, smtpUser, smtpPass and emailTo in Settings to enable delivery.');
+    toast('Email skipped — SMTP not configured', 'info');
+  } else if (['transcribe','summarize','save','email'].includes(fromStep)) {
+    setStep('email', 'active');
+    document.getElementById('step-email-detail').textContent = `Sending to ${config.emailTo}…`;
+    try {
+      await api.sendEmail({ config, notes: pipelineData.notes, transcriptPath: pipelineData.transcriptPath, notesPath: pipelineData.notesPath });
+      completedPct += STEP_WEIGHTS.email;
+      setStep('email', 'done');
+      document.getElementById('step-email-detail').textContent = `Sent to ${config.emailTo}`;
+      toast('Meeting notes sent to ' + config.emailTo, 'success');
+    } catch (e) {
+      // Email errors do not fail the pipeline — they warn and continue
+      completedPct += STEP_WEIGHTS.email;
+      setStep('email', 'skipped');
+      document.getElementById('step-email-detail').textContent = `Failed: ${e.message.split('\n')[0]}`;
+      appendStepLog('email', `WARNING: Email delivery failed: ${e.message}`);
+      toast('Email failed (pipeline continues): ' + e.message.split('\n')[0], 'error');
+    }
   }
 
-  // Populate results tab
-  lastResults = { transcript, notes, transcriptPath, notesPath, sessionDir };
+  pipelineState = 'done';
+  setOverallProgress(100, 'All done!', false);
+  document.getElementById('pipeline-success-actions').style.display = 'block';
+  hideErrorPanel();
+  lastResults = { ...pipelineData };
   populateResults(lastResults);
-  document.getElementById('record-status').textContent = 'Done! View results →';
+  document.getElementById('record-status').textContent = 'Done — see Results tab';
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 11. STEP LOG PANELS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Toggles the expandable log panel for a given step.
+ * @param {'transcribe'|'summarize'|'save'|'email'} step
+ */
+function toggleStepLog(step) {
+  const isOpen = stepLogOpen[step] = !stepLogOpen[step];
+  document.getElementById(`step-log-${step}`).classList.toggle('open', isOpen);
+  document.getElementById(`expand-btn-${step}`).classList.toggle('open', isOpen);
+}
+
+/**
+ * Appends a single log line to the appropriate step's log panel.
+ * Called by the IPC step-log event listener set up in init.
+ * Auto-scrolls the panel to the bottom.
+ * @param {'transcribe'|'summarize'|'save'|'email'} step
+ * @param {string} line
+ */
+function appendStepLog(step, line) {
+  const inner = document.getElementById(`step-log-inner-${step}`);
+  if (!inner) return;
+
+  // Remove the "Logs will appear here" placeholder on first real line
+  const placeholder = inner.querySelector('.step-log-empty');
+  if (placeholder) placeholder.remove();
+
+  const span = document.createElement('span');
+  const lower = line.toLowerCase();
+  if (lower.includes('[error]') || lower.includes('error') || lower.includes('fatal')) {
+    span.className = 'log-line-error';
+  } else if (lower.includes('[warn]') || lower.includes('warning')) {
+    span.className = 'log-line-warn';
+  } else if (lower.includes('done') || lower.includes('complete') || lower.includes('success')) {
+    span.className = 'log-line-ok';
+  }
+  span.textContent = line;
+  inner.appendChild(span);
+  inner.appendChild(document.createTextNode('\n'));
+
+  // Auto-scroll only if panel is open
+  if (stepLogOpen[step]) inner.scrollTop = inner.scrollHeight;
+
+  // Auto-open the panel when the step becomes active so the user can see activity
+  if (!stepLogOpen[step]) {
+    const stepEl = document.getElementById(`step-${step}`);
+    if (stepEl && stepEl.classList.contains('active')) toggleStepLog(step);
+  }
+}
+
+/** Clears all step log panels back to the placeholder state. */
+function clearAllStepLogs() {
+  ['transcribe','summarize','save','email'].forEach(step => {
+    const inner = document.getElementById(`step-log-inner-${step}`);
+    if (inner) inner.innerHTML = '<span class="step-log-empty">Logs will appear here when this step runs.</span>';
+    // Close panel
+    if (stepLogOpen[step]) {
+      stepLogOpen[step] = false;
+      document.getElementById(`step-log-${step}`)?.classList.remove('open');
+      document.getElementById(`expand-btn-${step}`)?.classList.remove('open');
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 12. PIPELINE VISUAL HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
 
 function setStep(name, state) {
   const el = document.getElementById(`step-${name}`);
-  el.className = `step ${state}`;
-  const icons = { done: '✓', active: '↻', error: '✕' };
+  if (!el) return;
+  el.className = `step ${state === 'idle' ? '' : state}`.trim();
+  const icons = { done: '✓', active: '↻', error: '✕', skipped: '—', idle: '✦' };
   el.querySelector('.step-icon').textContent = icons[state] || '✦';
+  if (state === 'skipped') {
+    const d = el.querySelector('.step-detail');
+    if (d) d.textContent = 'Skipped (disabled)';
+  }
 }
 
-function resetSteps() {
-  ['transcribe','summarize','save','email'].forEach(n => setStep(n, ''));
+function setOverallProgress(pct, label, isError) {
+  // Status is shown only through the step icons — no card-level red/green.
+  const lbl   = document.getElementById('overall-label');
+  const pctEl = document.getElementById('overall-pct');
+  if (pctEl) pctEl.textContent = Math.round(pct) + '%';
+  if (lbl)   lbl.textContent   = label;
 }
 
-// ─── Results ──────────────────────────────────────────────────────────────────
-function populateResults({ transcript, notes, transcriptPath, notesPath, sessionDir }) {
-  document.getElementById('no-results').style.display = 'none';
+// ═══════════════════════════════════════════════════════════════════════════════
+// 13. ERROR HANDLING
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function showErrorPanel(stepName, errorMsg) {
+  pipelineState  = 'failed';
+  lastFailedStep = stepName;
+  setOverallProgress(completedPct, `Failed at: ${stepName}`, true);
+  document.getElementById('error-panel-title-text').textContent = errorMsg.split('\n')[0];
+  document.getElementById('error-log-path-text').textContent    = logPath || '(no log path)';
+  const logBox  = document.getElementById('log-box');
+  logBox.innerHTML = 'Loading log…';
+  const logText = await api.readLog({ logPath });
+  logBox.innerHTML = logText.split('\n').map(line => {
+    const esc = line.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    return line.includes('[ERROR]') ? `<span class="log-error">${esc}</span>` : esc;
+  }).join('\n');
+  logBox.scrollTop = logBox.scrollHeight;
+  document.getElementById('error-panel').classList.add('visible');
+}
+
+function hideErrorPanel() { document.getElementById('error-panel').classList.remove('visible'); }
+
+async function retryFromFailed() {
+  if (!lastFailedStep) return;
+  hideErrorPanel();
+  setOverallProgress(completedPct, `Retrying from: ${lastFailedStep}…`, false);
+  await runPipeline(lastFailedStep);
+}
+
+async function restartPipeline() { resetPipeline(); await runPipeline('transcribe'); }
+
+function cancelPipeline() {
+  pipelineState = 'idle'; lastFailedStep = null;
+  hideErrorPanel();
+  setOverallProgress(0, 'Cancelled', false);
+  document.getElementById('record-status').textContent = 'Pipeline cancelled — ready to record again';
+  updateRecordButtonState();
+}
+
+function revealLog() { if (logPath) api.revealFile({ filePath: logPath }); }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 14. RESULTS POPULATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function populateResults({ transcript, notes, transcriptPath, notesPath, sessionDir: sDir }) {
+  document.getElementById('no-results').style.display      = 'none';
   document.getElementById('results-content').style.display = 'block';
-  document.getElementById('notes-output').textContent = notes;
-  document.getElementById('transcript-output').textContent = transcript;
-  document.getElementById('notes-provider-badge').textContent =
-    aiProvider === 'claude' ? 'Claude Opus' : 'GPT-4o';
-  document.getElementById('session-files').innerHTML = [
-    `📁 Session: <code style="color:var(--accent2)">${sessionDir}</code>`,
-    `📝 transcript.txt`,
-    `📋 meeting_notes.md`,
-    `📺 subtitles.srt`,
-    `🎬 recording.webm`
-  ].join('<br>');
+  document.getElementById('notes-output').textContent      = notes || '(AI summary was disabled)';
+
+  // Only show the transcript card if transcript was generated
+  const tc = document.getElementById('result-transcript-card');
+  if (transcript && enableTranscript) {
+    document.getElementById('transcript-output').textContent = transcript;
+    tc.style.display = 'block';
+  } else {
+    tc.style.display = 'none';
+  }
+
+  const labels = { claude: 'Claude Opus', chatgpt: 'GPT-4o', gemini: 'Gemini 1.5' };
+  const badge  = document.getElementById('notes-provider-badge');
+  badge.textContent = enableSummary ? (labels[aiProvider] || aiProvider) : 'No AI';
+  badge.className   = 'badge ' + (aiProvider === 'gemini' && enableSummary ? 'badge-gemini' : enableSummary ? 'badge-blue' : 'badge-green');
+
+  const files = [
+    `📁 <code style="color:var(--accent2)">${sDir}</code>`,
+    notes ? '📋 meeting_notes.md' : null,
+    transcript && enableTranscript ? '📝 transcript.txt' : null,
+    enableSubtitles ? '📺 subtitles.srt' : null,
+    '🎬 recording.webm',
+    '📄 pipeline.log'
+  ].filter(Boolean);
+  document.getElementById('session-files').innerHTML = files.join('<br>');
 }
 
-// ─── Settings ─────────────────────────────────────────────────────────────────
-function applyConfigToForm(cfg) {
-  const fields = ['anthropicKey','openaiKey','whisperModel','smtpHost','smtpPort',
-                  'smtpUser','smtpPass','emailFrom','emailTo'];
-  fields.forEach(f => {
-    const el = document.getElementById(`cfg-${f}`);
-    if (el && cfg[f] !== undefined) el.value = cfg[f];
-  });
+// ═══════════════════════════════════════════════════════════════════════════════
+// 15. STANDALONE SUMMARIZE PAGE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function loadTranscriptFromFile() {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.txt,text/plain';
+  input.onchange = () => {
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      document.getElementById('sum-transcript').value = e.target.result;
+      document.getElementById('sum-transcript-hint').textContent = `Loaded: ${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+      window._sumSourceFilePath = file.path;
+    };
+    reader.readAsText(file);
+  };
+  input.click();
 }
+
+function clearSumTranscript() {
+  document.getElementById('sum-transcript').value = '';
+  document.getElementById('sum-transcript-hint').textContent = '';
+  document.getElementById('sum-output-wrap').style.display  = 'none';
+  document.getElementById('sum-status').textContent = '';
+  window._sumSourceFilePath = null;
+}
+
+async function runStandaloneSummary() {
+  const transcript = document.getElementById('sum-transcript').value.trim();
+  if (!transcript) return toast('Paste or load a transcript first.', 'error');
+  const btn          = document.getElementById('sum-run-btn');
+  const status       = document.getElementById('sum-status');
+  const progressWrap = document.getElementById('sum-progress-wrap');
+  const fill         = document.getElementById('sum-progress-fill');
+  const outputWrap   = document.getElementById('sum-output-wrap');
+  btn.disabled = true; outputWrap.style.display = 'none'; progressWrap.style.display = 'block'; fill.style.width = '10%';
+  const label = { claude: 'Claude Opus', chatgpt: 'GPT-4o', gemini: 'Gemini 1.5 Pro' }[sumProvider] || sumProvider;
+  status.textContent = `Generating with ${label}…`;
+  const anim = setInterval(() => { const c = parseFloat(fill.style.width) || 10; if (c < 85) fill.style.width = (c + (85 - c) * 0.08) + '%'; }, 300);
+  try {
+    const notes = await api.summarize({ transcript, provider: sumProvider, config });
+    clearInterval(anim); fill.style.width = '100%'; status.textContent = 'Done!';
+    document.getElementById('sum-notes-output').textContent = notes;
+    const badge = document.getElementById('sum-provider-badge');
+    badge.textContent = label;
+    badge.className   = 'badge ' + (sumProvider === 'gemini' ? 'badge-gemini' : 'badge-blue');
+    outputWrap.style.display = 'block';
+    window._sumGeneratedNotes = notes;
+    window._sumGeneratedAt    = new Date().toLocaleString();
+    setTimeout(() => { progressWrap.style.display = 'none'; fill.style.width = '0%'; }, 800);
+  } catch (e) {
+    clearInterval(anim); fill.style.width = '100%'; fill.style.background = 'var(--red)';
+    status.textContent = 'Failed: ' + e.message;
+    toast('Summarization failed: ' + e.message, 'error');
+    setTimeout(() => { progressWrap.style.display = 'none'; fill.style.width = '0%'; fill.style.background = ''; }, 2000);
+  } finally { btn.disabled = false; }
+}
+
+function copySumNotes() {
+  const notes = window._sumGeneratedNotes;
+  if (!notes) return;
+  navigator.clipboard.writeText(notes).then(() => toast('Notes copied to clipboard', 'success'));
+}
+
+function saveSumNotesAs() {
+  const notes = window._sumGeneratedNotes;
+  if (!notes) return;
+  const content = `# Meeting Notes\n> Generated: ${window._sumGeneratedAt}\n> Provider: ${sumProvider}\n\n---\n\n` + notes;
+  if (window._sumSourceFilePath) {
+    const slash = window._sumSourceFilePath.lastIndexOf('/');
+    const dir   = slash >= 0 ? window._sumSourceFilePath.slice(0, slash) : null;
+    if (dir) {
+      api.saveOutputs({ sessionDir: dir, transcript: null, notes, srt: null })
+        .then(() => { document.getElementById('sum-save-hint').textContent = `Saved to ${dir}/meeting_notes.md`; toast('Saved meeting_notes.md', 'success'); })
+        .catch(e => toast('Save failed: ' + e.message, 'error'));
+      return;
+    }
+  }
+  const blob = new Blob([content], { type: 'text/markdown' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a'); a.href = url; a.download = 'meeting_notes.md'; a.click();
+  URL.revokeObjectURL(url);
+  document.getElementById('sum-save-hint').textContent = 'File downloaded to your Downloads folder.';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 16. SETTINGS FORM
+// ═══════════════════════════════════════════════════════════════════════════════
 
 async function saveSettings() {
-  const fields = ['anthropicKey','openaiKey','whisperModel','smtpHost','smtpPort',
-                  'smtpUser','smtpPass','emailFrom','emailTo'];
-  fields.forEach(f => {
-    const el = document.getElementById(`cfg-${f}`);
-    if (el) config[f] = el.value;
-  });
+  const fields = ['anthropicKey','openaiKey','geminiKey','whisperModel','smtpHost','smtpPort','smtpUser','smtpPass','emailFrom','emailTo'];
+  fields.forEach(f => { const el = document.getElementById(`cfg-${f}`); if (el) config[f] = el.value; });
+  config.aiProvider      = aiProvider;
+  config.enableSummary   = enableSummary;
+  config.enableTranscript= enableTranscript;
+  config.enableSubtitles = enableSubtitles;
+  config.enableEmail     = enableEmail;
   await api.saveConfig(config);
   toast('Settings saved', 'success');
+}
+
+function applyConfigToForm(cfg) {
+  const fields = ['anthropicKey','openaiKey','geminiKey','whisperModel','smtpHost','smtpPort','smtpUser','smtpPass','emailFrom','emailTo'];
+  fields.forEach(f => { const el = document.getElementById(`cfg-${f}`); if (el && cfg[f] !== undefined) el.value = cfg[f]; });
 }
 
 async function testEmail() {
   await saveSettings();
   try {
-    await api.sendEmail({
-      config,
-      notes: 'This is a test email from Meeting Recorder.',
-      transcriptPath: '',
-      notesPath: '',
-      sessionDir: ''
-    });
+    await api.sendEmail({ config, notes: 'Test email from Meeting Recorder.', transcriptPath: '', notesPath: '' });
     toast('Test email sent!', 'success');
-  } catch(e) {
-    toast('Test failed: ' + e.message, 'error');
+  } catch (e) { toast('Test failed: ' + e.message, 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 17. UTILITY HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 18. TEST SETUP PAGE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Initialises the test page audio device list when the tab is first opened.
+ * Reuses the existing audioDevices array if already loaded, otherwise fetches.
+ */
+async function initTestPage() {
+  const container = document.getElementById('test-audio-device-list');
+  if (!audioDevices.length) {
+    container.innerHTML = '<div style="color:var(--text3);font-size:13px">Loading devices…</div>';
+    try { audioDevices = await api.listAudioDevices(); } catch {}
+  }
+  renderTestAudioDevices(audioDevices);
+}
+
+function renderTestAudioDevices(devices) {
+  const container = document.getElementById('test-audio-device-list');
+  container.innerHTML = '';
+  const physDevices = devices.filter(d => d.type !== 'app');
+  const appDevices  = devices.filter(d => d.type === 'app');
+
+  function renderItem(d) {
+    const div = document.createElement('div');
+    const isSelected = testSelectedDevice?.index === d.index;
+    div.className = 'audio-device-item' + (isSelected ? ' selected' : '');
+    div.dataset.index = d.index;
+    if (d.type === 'app') {
+      const rb = d.running
+        ? '<span style="font-size:10px;background:rgba(34,197,94,.2);color:var(--green);border-radius:4px;padding:1px 6px;margin-left:6px">running</span>'
+        : '<span style="font-size:10px;background:var(--bg3);color:var(--text3);border-radius:4px;padding:1px 6px;margin-left:6px">not detected</span>';
+      const check = isSelected ? '<span class="audio-device-check">✓</span>' : '';
+      div.innerHTML = `<span class="audio-device-icon">📱</span><div class="audio-device-info"><div class="audio-device-name">${d.name.replace(' (App Audio)','')}${rb}</div><div class="audio-device-sub" style="font-family:monospace;font-size:10px;opacity:.7">${d.appBundleId}</div></div>${check}`;
+    } else {
+      const isLoopback = d.name.toLowerCase().includes('blackhole') || d.name.toLowerCase().includes('cable');
+      const isAirPods  = d.name.toLowerCase().includes('airpod') || d.name.toLowerCase().includes('beats');
+      const isMic      = d.name.toLowerCase().includes('mic');
+      const icon  = isLoopback ? '🔁' : isAirPods ? '🎧' : isMic ? '🎤' : '🔊';
+      const check = isSelected ? '<span class="audio-device-check">✓</span>' : '';
+      div.innerHTML = `<span class="audio-device-icon">${icon}</span><div class="audio-device-info"><div class="audio-device-name">[${d.index}] ${d.name}</div><div class="audio-device-sub">${isLoopback ? 'Virtual loopback' : isAirPods ? 'AirPods / wireless' : isMic ? 'Microphone' : 'Audio input'}</div></div>${check}`;
+    }
+    div.onclick = () => selectTestDevice(d);
+    container.appendChild(div);
+  }
+
+  if (physDevices.length) {
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;padding:4px 2px 4px;';
+    hdr.textContent = 'Audio Devices';
+    container.appendChild(hdr);
+    physDevices.forEach(renderItem);
+  }
+  if (appDevices.length) {
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;padding:8px 2px 4px;';
+    hdr.textContent = 'Application Audio Capture';
+    container.appendChild(hdr);
+    appDevices.forEach(renderItem);
   }
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+function selectTestDevice(device) {
+  testSelectedDevice = device;
+  renderTestAudioDevices(audioDevices);
+  document.getElementById('test-audio-badge').textContent  = device.name;
+  document.getElementById('test-audio-badge').className    = 'badge badge-blue';
+  document.getElementById('test-vu-hint').textContent      = 'Speak now — watch the level bar.';
+  testChecks.audio = true;
+  updateTestRecordButton();
+  updateTestChecklist();
+  if (device.type !== 'app') {
+    startTestVu(device.name);
+  } else {
+    stopTestVu();
+    document.getElementById('test-vu-hint').textContent = 'App Audio Capture selected — VU preview not available. The app audio will be captured when recording.';
+    testChecks.audio = true;
+    updateTestRecordButton();
+  }
+}
+
+// ── Test VU meter (separate from the main recording VU) ──────────────────────
+async function startTestVu(deviceName) {
+  stopTestVu();
+  try {
+    const allDevices  = await navigator.mediaDevices.enumerateDevices();
+    const audioInputs = allDevices.filter(d => d.kind === 'audioinput');
+    const matched     = audioInputs.find(d => d.label.toLowerCase() === deviceName.toLowerCase())
+                     || audioInputs.find(d => d.label.toLowerCase().includes(deviceName.toLowerCase().split(' ')[0]));
+    testVuMicStream = await navigator.mediaDevices.getUserMedia({
+      audio: matched ? { deviceId: { exact: matched.deviceId } } : true, video: false
+    });
+    testVuAudioCtx  = new AudioContext();
+    testVuAnalyser  = testVuAudioCtx.createAnalyser();
+    testVuAnalyser.fftSize = 256;
+    testVuDataArray = new Uint8Array(testVuAnalyser.fftSize);
+    testVuSource    = testVuAudioCtx.createMediaStreamSource(testVuMicStream);
+    testVuSource.connect(testVuAnalyser);
+    testVuRafId     = requestAnimationFrame(testVuTick);
+    document.getElementById('test-vu-hint').textContent = 'Speak now — if the bar moves, audio is working.';
+  } catch (e) {
+    document.getElementById('test-vu-hint').textContent = 'Could not open audio preview: ' + e.message;
+  }
+}
+
+function testVuTick() {
+  if (!testVuAnalyser) return;
+  testVuAnalyser.getByteTimeDomainData(testVuDataArray);
+  let sumSq = 0;
+  for (let i = 0; i < testVuDataArray.length; i++) { const s = (testVuDataArray[i] - 128) / 128; sumSq += s * s; }
+  const pct = Math.min(100, Math.sqrt(sumSq / testVuDataArray.length) * 400);
+  const fill = document.getElementById('test-vu-fill');
+  if (fill) fill.style.width = pct + '%';
+  testVuRafId = requestAnimationFrame(testVuTick);
+}
+
+function stopTestVu() {
+  if (testVuRafId)    { cancelAnimationFrame(testVuRafId); testVuRafId = null; }
+  if (testVuSource)   { try { testVuSource.disconnect(); } catch {} testVuSource = null; }
+  if (testVuAnalyser) { try { testVuAnalyser.disconnect(); } catch {} testVuAnalyser = null; }
+  if (testVuAudioCtx) { testVuAudioCtx.close().catch(() => {}); testVuAudioCtx = null; }
+  if (testVuMicStream){ testVuMicStream.getTracks().forEach(t => t.stop()); testVuMicStream = null; }
+  const fill = document.getElementById('test-vu-fill');
+  if (fill) fill.style.width = '0%';
+}
+
+// ── Screen picker for test ───────────────────────────────────────────────────
+async function testPickScreen() {
+  const btn = document.getElementById('test-pick-screen-btn');
+  btn.disabled = true; btn.textContent = 'Loading…';
+  try {
+    const sources = await api.getWindows();
+    if (!sources.length) { toast('No windows found', 'error'); return; }
+    // Sort and use the first screen, or let the user select via a mini picker
+    // For simplicity, show a quick prompt with the list — open a mini overlay
+    showScreenPickerOverlay(sources);
+  } catch (e) {
+    toast('Failed to load windows: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = '🖥 Pick a Screen';
+  }
+}
+
+function showScreenPickerOverlay(sources) {
+  // Reuse the sorted window list
+  const sorted = sources.sort((a, b) => {
+    const aS = a.id.startsWith('screen:'), bS = b.id.startsWith('screen:');
+    if (aS !== bS) return aS ? -1 : 1;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+  });
+
+  // Build a simple overlay
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:flex;align-items:center;justify-content:center;';
+  const box = document.createElement('div');
+  box.style.cssText = 'background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;width:460px;max-height:460px;overflow-y:auto;';
+  box.innerHTML = '<div style="font-size:15px;font-weight:700;margin-bottom:14px">Select a screen or window</div>';
+  sorted.forEach(w => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px;cursor:pointer;border-radius:6px;border:1px solid transparent;margin-bottom:4px;';
+    row.onmouseenter = () => row.style.background = 'var(--bg3)';
+    row.onmouseleave = () => row.style.background = '';
+    row.innerHTML = `<img src="${w.thumbnail}" style="width:72px;height:41px;object-fit:cover;border-radius:4px;background:#000;"/><div style="flex:1;font-size:13px;font-weight:500">${w.name}</div>`;
+    row.onclick = () => {
+      document.body.removeChild(overlay);
+      confirmTestScreen(w);
+    };
+    box.appendChild(row);
+  });
+  const cancel = document.createElement('button');
+  cancel.className = 'btn btn-ghost';
+  cancel.style.marginTop = '10px';
+  cancel.textContent = 'Cancel';
+  cancel.onclick = () => document.body.removeChild(overlay);
+  box.appendChild(cancel);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+
+async function confirmTestScreen(source) {
+  testSelectedScreen = source;
+  document.getElementById('test-screen-badge').textContent = source.name;
+  document.getElementById('test-screen-badge').className   = 'badge badge-blue';
+  testChecks.screen = true;
+  updateTestRecordButton();
+  updateTestChecklist();
+
+  // Show a live preview
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: source.id, minWidth: 640, maxWidth: 1920 } }
+    });
+    const vid = document.getElementById('test-screen-preview');
+    vid.srcObject = stream; vid.play();
+    document.getElementById('test-screen-preview-wrap').style.display = 'block';
+  } catch (e) {
+    console.warn('Test preview failed:', e.message);
+  }
+}
+
+// ── Test recording ────────────────────────────────────────────────────────────
+function updateTestRecordButton() {
+  const btn = document.getElementById('test-rec-btn');
+  const ready = testSelectedScreen && testSelectedDevice;
+  btn.disabled = !ready;
+  document.getElementById('test-rec-status').textContent = ready
+    ? 'Ready. Click Start, speak a few sentences, then stop.'
+    : (!testSelectedScreen ? 'Pick a screen first.' : 'Select an audio device first.');
+}
+
+async function toggleTestRecording() {
+  if (!testIsRecording) await startTestRecording();
+  else await stopTestRecording();
+}
+
+async function startTestRecording() {
+  if (!testSelectedScreen || !testSelectedDevice) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: testSelectedScreen.id, minWidth: 640, maxWidth: 1920 } }
+    });
+    const session = await api.recordingStart();
+    testSessionDir = session.sessionDir;
+    const audioResult = await api.startAudio({
+      sessionDir:      testSessionDir,
+      audioDevice:     testSelectedDevice.name,
+      audioDeviceType: testSelectedDevice.type || 'device',
+      appBundleId:     testSelectedDevice.appBundleId || null
+    });
+    testAudioPath = audioResult.audioPath;
+
+    // Audio MediaRecorder for test
+    let testAudioConstraints = { audio: true, video: false };
+    if (testSelectedDevice.type !== 'app') {
+      try {
+        const allBrowserDevices = await navigator.mediaDevices.enumerateDevices();
+        const inputs = allBrowserDevices.filter(d => d.kind === 'audioinput');
+        const devName = testSelectedDevice.name.toLowerCase();
+        const matched = inputs.find(d => d.label.toLowerCase() === devName)
+                     || inputs.find(d => d.label.toLowerCase().includes(devName.split(' ')[0].toLowerCase()));
+        if (matched) testAudioConstraints = { audio: { deviceId: { exact: matched.deviceId } }, video: false };
+      } catch {}
+    }
+    testAudioMicStream     = await navigator.mediaDevices.getUserMedia(testAudioConstraints);
+    const testAudioMime    = ['audio/webm;codecs=opus','audio/webm','audio/ogg'].find(m => MediaRecorder.isTypeSupported(m)) || 'audio/webm';
+    testAudioMediaRecorder = new MediaRecorder(testAudioMicStream, { mimeType: testAudioMime });
+    testAudioMediaRecorder.ondataavailable = async (e) => {
+      if (e.data.size > 0) await api.saveAudioChunk(await e.data.arrayBuffer());
+    };
+    testAudioMediaRecorder.start(2000);
+
+    testStream = stream;
+    testMediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+    testMediaRecorder.ondataavailable = async (e) => { if (e.data.size > 0) await api.saveVideoChunk(await e.data.arrayBuffer()); };
+    testMediaRecorder.start(2000);
+
+    testIsRecording = true; testElapsed = 0;
+    const btn = document.getElementById('test-rec-btn');
+    btn.textContent = '⏹ Stop Recording'; btn.classList.add('recording');
+    document.getElementById('test-rec-badge').textContent = '● Recording…';
+    document.getElementById('test-rec-badge').className   = 'badge badge-blue';
+    document.getElementById('test-rec-status').textContent = 'Recording… speak clearly then click Stop.';
+    document.getElementById('test-rec-badge').style.color  = 'var(--red)';
+
+    testTimerInterval = setInterval(() => {
+      testElapsed++;
+      const m = Math.floor(testElapsed / 60), s = testElapsed % 60;
+      document.getElementById('test-rec-timer').textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    }, 1000);
+  } catch (e) { toast('Test recording failed: ' + e.message, 'error'); }
+}
+
+async function stopTestRecording() {
+  if (!testIsRecording) return;
+  testIsRecording = false;
+  clearInterval(testTimerInterval);
+
+  testMediaRecorder.stop();
+  testMediaRecorder.stream.getTracks().forEach(t => t.stop());
+
+  if (testAudioMediaRecorder && testAudioMediaRecorder.state !== 'inactive') {
+    await new Promise(resolve => { testAudioMediaRecorder.onstop = resolve; testAudioMediaRecorder.stop(); });
+  }
+  if (testAudioMicStream) { testAudioMicStream.getTracks().forEach(t => t.stop()); testAudioMicStream = null; }
+  testAudioMediaRecorder = null;
+
+  await api.stopAudio({ sessionDir: testSessionDir });
+  await api.recordingStop({ sessionDir: testSessionDir });
+
+  const btn = document.getElementById('test-rec-btn');
+  btn.textContent = '⏺ Start Test Recording'; btn.classList.remove('recording');
+  document.getElementById('test-rec-badge').textContent = '✓ Recorded';
+  document.getElementById('test-rec-badge').className   = 'badge badge-green';
+  document.getElementById('test-rec-badge').style.color  = '';
+  document.getElementById('test-rec-status').textContent = 'Recording saved. Proceed to Step 4 to transcribe.';
+  testChecks.recording = true;
+  updateTestChecklist();
+
+  // Show the transcription card
+  document.getElementById('test-transcribe-card').style.display = 'block';
+  document.getElementById('test-transcribe-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── Test transcription ────────────────────────────────────────────────────────
+async function runTestTranscribe() {
+  if (!testAudioPath) return toast('No test recording found.', 'error');
+  const btn      = document.getElementById('test-tx-btn');
+  const status   = document.getElementById('test-tx-status');
+  const progress = document.getElementById('test-tx-progress');
+  const fill     = document.getElementById('test-tx-fill');
+  const output   = document.getElementById('test-tx-output');
+  const badge    = document.getElementById('test-tx-badge');
+
+  btn.disabled = true; status.textContent = 'Transcribing…';
+  progress.style.display = 'block'; fill.style.width = '10%'; output.style.display = 'none';
+  badge.textContent = 'transcribing…'; badge.className = 'badge badge-blue';
+
+  const anim = setInterval(() => {
+    const c = parseFloat(fill.style.width) || 10;
+    if (c < 85) fill.style.width = (c + (85 - c) * 0.07) + '%';
+  }, 400);
+
+  try {
+    const result = await api.transcribe({ audioPath: testAudioPath, model: config.whisperModel || 'base' });
+    clearInterval(anim); fill.style.width = '100%';
+
+    const text = result.text || '';
+    document.getElementById('test-tx-text').textContent = text || '(no speech detected)';
+    output.style.display = 'block';
+
+    const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+    const resultEl  = document.getElementById('test-tx-result');
+    if (wordCount >= 3) {
+      resultEl.style.background = 'rgba(34,197,94,.08)';
+      resultEl.style.border     = '1px solid rgba(34,197,94,.3)';
+      resultEl.style.color      = 'var(--green)';
+      resultEl.textContent      = '✓ Audio capture and transcription are working. ' + wordCount + ' words detected.';
+      badge.textContent = '✓ Pass'; badge.className = 'badge badge-green';
+      testChecks.transcribe = true;
+    } else {
+      resultEl.style.background = 'rgba(239,68,68,.08)';
+      resultEl.style.border     = '1px solid rgba(239,68,68,.3)';
+      resultEl.style.color      = 'var(--red)';
+      resultEl.textContent      = wordCount === 0
+        ? '⚠ No speech detected. Check your audio device selection and speak louder next time.'
+        : '⚠ Only ' + wordCount + ' word(s) detected — try a longer recording and speak clearly.';
+      badge.textContent = '⚠ Check audio'; badge.className = 'badge';
+      badge.style.background = 'rgba(239,68,68,.15)'; badge.style.color = 'var(--red)';
+    }
+
+    status.textContent = 'Done.';
+    setTimeout(() => { progress.style.display = 'none'; fill.style.width = '0%'; }, 600);
+    updateTestChecklist();
+
+    // Show summary checklist
+    document.getElementById('test-summary-card').style.display = 'block';
+    document.getElementById('test-summary-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    clearInterval(anim);
+    fill.style.width = '100%'; fill.style.background = 'var(--red)';
+    status.textContent = 'Failed: ' + e.message;
+    badge.textContent = '✕ Failed'; badge.className = 'badge';
+    badge.style.background = 'rgba(239,68,68,.15)'; badge.style.color = 'var(--red)';
+    toast('Transcription test failed: ' + e.message, 'error');
+    setTimeout(() => { progress.style.display = 'none'; fill.style.width = '0%'; fill.style.background = ''; }, 2000);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function updateTestChecklist() {
+  const items = [
+    { key: 'screen',     label: 'Screen selected',              done: testChecks.screen     },
+    { key: 'audio',      label: 'Audio device selected',        done: testChecks.audio      },
+    { key: 'recording',  label: 'Test recording completed',     done: testChecks.recording  },
+    { key: 'transcribe', label: 'Transcription verified',       done: testChecks.transcribe },
+  ];
+  const card = document.getElementById('test-checklist');
+  if (!card) return;
+  card.innerHTML = items.map(it =>
+    '<div style="display:flex;align-items:center;gap:10px;">' +
+    '<span style="font-size:16px">' + (it.done ? '✅' : '⬜') + '</span>' +
+    '<span style="color:' + (it.done ? 'var(--text)' : 'var(--text2)') + '">' + it.label + '</span>' +
+    '</div>'
+  ).join('');
+
+  const allDone = items.every(i => i.done);
+  const summCard = document.getElementById('test-summary-card');
+  if (summCard.style.display !== 'none' && allDone) {
+    const existing = summCard.querySelector('.all-done-msg');
+    if (!existing) {
+      const msg = document.createElement('div');
+      msg.className = 'all-done-msg';
+      msg.style.cssText = 'margin-top:12px;padding:10px 14px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3);border-radius:var(--radius-sm);font-size:13px;color:var(--green);font-weight:600;';
+      msg.textContent = '✓ All checks passed — your setup is ready for real meetings.';
+      summCard.querySelector('.divider').before(msg);
+    }
+  }
+}
+
+function resetTestSetup() {
+  testSelectedScreen = null; testSelectedDevice = null;
+  testIsRecording = false; testAudioPath = null; testSessionDir = null;
+  testAudioMediaRecorder = null; testAudioMicStream = null;
+  testChecks = { screen: false, audio: false, recording: false, transcribe: false };
+  stopTestVu();
+
+  document.getElementById('test-screen-badge').textContent   = 'not selected';
+  document.getElementById('test-screen-badge').className     = 'badge';
+  document.getElementById('test-screen-badge').style.cssText = 'background:var(--bg3);color:var(--text3)';
+  document.getElementById('test-audio-badge').textContent    = 'not selected';
+  document.getElementById('test-audio-badge').className      = 'badge';
+  document.getElementById('test-audio-badge').style.cssText  = 'background:var(--bg3);color:var(--text3)';
+  document.getElementById('test-rec-badge').textContent      = 'idle';
+  document.getElementById('test-rec-badge').className        = 'badge';
+  document.getElementById('test-rec-badge').style.cssText    = 'background:var(--bg3);color:var(--text3)';
+  document.getElementById('test-rec-timer').textContent      = '00:00';
+  document.getElementById('test-rec-btn').disabled           = true;
+  document.getElementById('test-rec-btn').textContent        = '⏺ Start Test Recording';
+  document.getElementById('test-rec-status').textContent     = 'Select a screen and audio device first.';
+  document.getElementById('test-vu-fill').style.width        = '0%';
+  document.getElementById('test-vu-hint').textContent        = 'Select a device above to see the live level.';
+  document.getElementById('test-screen-preview-wrap').style.display = 'none';
+  document.getElementById('test-transcribe-card').style.display     = 'none';
+  document.getElementById('test-summary-card').style.display        = 'none';
+
+  renderTestAudioDevices(audioDevices);
+  updateTestChecklist();
+}
+
 function formatTime(s) {
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  return [h, m, sec].map(n => String(n).padStart(2, '0')).join(':');
+  return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map(n => String(n).padStart(2, '0')).join(':');
 }
 
 let toastTimer;
 function toast(msg, type = 'info') {
   const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.className = `show ${type}`;
+  el.textContent = msg; el.className = `show ${type}`;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 4000);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 4500);
 }
 </script>
 </body>
